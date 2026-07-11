@@ -5,14 +5,14 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>KI-Werkstatt</title>
 <!-- Schriften: Space Grotesk (Display) + JetBrains Mono (Zahlen/Code).
-     Faellt ohne Internet sauber auf System-Schriften zurueck. -->
+     Fällt ohne Internet sauber auf System-Schriften zurück. -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
 <style>
   /* ---------------------------------------------------------------
      Design v2: "Neon-Werkstatt".
-     Signatur: Gruen->Cyan-Neon-Duo + animierter Score-Ring.
+     Signatur: Grün->Cyan-Neon-Duo + animierter Score-Ring.
      Dunkle Werkstatt-DNA bleibt, bekommt aber Glow, Tiefe und Bewegung.
   ----------------------------------------------------------------*/
   :root {
@@ -25,11 +25,11 @@
     --ink-dim:   #8b95a8;
 
     /* Neon-Duo (Marken-Signatur) */
-    --neo-a:     #34f5a2;   /* Neon-Gruen */
+    --neo-a:     #34f5a2;   /* Neon-Grün */
     --neo-b:     #38e0ff;   /* Neon-Cyan  */
     --grad:      linear-gradient(135deg, var(--neo-a), var(--neo-b));
 
-    /* Funktionale Ampel (bleibt eigenstaendig!) */
+    /* Funktionale Ampel (bleibt eigenständig!) */
     --ok:        #4ade80;
     --ok-dk:     #123324;
     --warn:      #fbbf24;
@@ -79,6 +79,10 @@
   .wrap { max-width: 800px; margin: 0 auto; }
 
   header { margin-bottom: 22px; }
+  .header-top {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 12px;
+  }
   .brand {
     font-family: var(--mono);
     font-size: 12.5px; font-weight: 700;
@@ -87,9 +91,27 @@
     background: var(--grad);
     -webkit-background-clip: text; background-clip: text;
     color: transparent;
-    margin-bottom: 12px;
     display: inline-block;
   }
+
+  /* --- Sprach-Toggle DE/EN --- */
+  .lang-toggle { display: flex; gap: 5px; }
+  .lang-btn {
+    font-family: var(--mono); font-size: 11.5px; font-weight: 700;
+    letter-spacing: .8px;
+    background: var(--panel-2); color: var(--ink-dim);
+    border: 1px solid var(--line); border-radius: 8px;
+    padding: 5px 11px; cursor: pointer;
+    transition: all .16s;
+  }
+  .lang-btn:hover { color: var(--ink); border-color: var(--line-hi); }
+  .lang-btn.sel {
+    color: #06110c;
+    background: var(--grad);
+    border-color: transparent;
+    box-shadow: 0 0 12px rgba(52,245,162,.30);
+  }
+
   h1 {
     font-family: var(--disp);
     font-size: 32px; font-weight: 700;
@@ -221,6 +243,20 @@
   }
   @keyframes shimmer { from { transform: translateX(-120%); } to { transform: translateX(320%); } }
   .status.error { background: var(--danger-dk); border: 1px solid var(--danger); color: #fca5a5; }
+
+  /* Info-Box: zeigt das hinweis-Feld der Analyse (z.B. bei fast-leerem Prompt) */
+  .info-box {
+    display: none;
+    background: var(--panel);
+    border: 1px solid var(--neo-b);
+    border-left: 3px solid var(--neo-b);
+    border-radius: var(--radius);
+    padding: 14px 18px;
+    margin-bottom: 16px;
+    font-size: 14px; color: var(--ink);
+  }
+  .info-box.show { display: block; animation: panelIn .25s ease both; }
+  .info-box b { color: var(--neo-b); }
 
   pre {
     background: #0a0c10;
@@ -359,6 +395,31 @@
   }
   textarea::placeholder { color: #566072; }
 
+  /* --- Demo-Buttons: Beispiel-Prompts laden --- */
+  .demo-row {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    margin-top: 10px;
+  }
+  .demo-label {
+    font-family: var(--mono); font-size: 11.5px; color: var(--ink-dim);
+    text-transform: uppercase; letter-spacing: .8px;
+  }
+  .demo-btn {
+    font-family: var(--mono); font-size: 12px; font-weight: 500;
+    background: var(--panel-2); color: var(--ink-dim);
+    border: 1px solid var(--line); border-radius: 8px;
+    padding: 6px 12px; cursor: pointer;
+    transition: all .16s;
+  }
+  .demo-btn:hover { color: var(--ink); border-color: var(--line-hi); transform: translateY(-1px); }
+  .demo-btn .demo-dot {
+    display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+    margin-right: 6px; vertical-align: 0;
+  }
+  .demo-btn.weak .demo-dot   { background: var(--danger); box-shadow: 0 0 6px rgba(248,113,113,.5); }
+  .demo-btn.medium .demo-dot { background: var(--warn);   box-shadow: 0 0 6px rgba(251,191,36,.5); }
+  .demo-btn.strong .demo-dot { background: var(--ok);     box-shadow: 0 0 6px rgba(74,222,128,.5); }
+
   .pt-result { display: none; }
   .pt-result.show { display: block; animation: panelIn .35s ease both; }
 
@@ -456,7 +517,7 @@
   }
   footer code { font-family: var(--mono); color: var(--neo-a); }
 
-  /* --- Bewegung reduzieren, wenn das System es wuenscht --- */
+  /* --- Bewegung reduzieren, wenn das System es wünscht --- */
   @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after {
       animation-duration: .01ms !important;
@@ -481,18 +542,21 @@
 <div class="wrap">
 
   <header>
-    <div class="brand">// ki-werkstatt · lokal</div>
+    <div class="header-top">
+      <div class="brand" id="brand">// ki-werkstatt · lokal</div>
+      <div class="lang-toggle" id="langToggle" role="group" aria-label="Sprache / Language">
+        <button class="lang-btn sel" data-lang="de">DE</button>
+        <button class="lang-btn" data-lang="en">EN</button>
+      </div>
+    </div>
     <h1 id="pageTitle">Datei rein, effizientes Format raus.</h1>
-    <p class="sub" id="pageSub">
-      Zieh ein <code>PDF</code>, <code>Word</code> oder <code>Excel</code> hinein.
-      Fliesstext wird zu Markdown, Tabellen zu CSV &mdash; passend verpackt fuer dein KI-Modell.
-    </p>
+    <p class="sub" id="pageSub"></p>
   </header>
 
   <!-- Tabs -->
   <div class="tabs">
-    <button class="tab active" data-tab="konverter">Datei-Konverter</button>
-    <button class="tab" data-tab="trainer">Prompt-Trainer</button>
+    <button class="tab active" data-tab="konverter" id="tabConv">Datei-Konverter</button>
+    <button class="tab" data-tab="trainer" id="tabTrainer">Prompt-Trainer</button>
   </div>
 
   <!-- ============ TAB 1: KONVERTER ============ -->
@@ -500,15 +564,15 @@
 
     <div class="drop" id="drop">
       <div class="drop-icon">↓</div>
-      <div class="drop-main">Datei hierher ziehen oder klicken</div>
-      <div class="drop-hint">pdf · docx · xlsx · csv · txt · pptx</div>
+      <div class="drop-main" id="dropMain">Datei hierher ziehen oder klicken</div>
+      <div class="drop-hint" id="dropHint">pdf · docx · xlsx · csv · txt · pptx</div>
       <input type="file" id="fileInput" accept=".pdf,.docx,.xlsx,.xlsm,.csv,.txt,.md,.pptx">
     </div>
 
     <div class="card model-row">
       <div>
-        <div class="label">Fuer welches KI-Modell verpacken?</div>
-        <div class="hint" id="convModelHint">Claude mag XML-Tags (offizielle Anthropic-Empfehlung).</div>
+        <div class="label" id="convModelLabel">Für welches KI-Modell verpacken?</div>
+        <div class="hint" id="convModelHint"></div>
       </div>
       <div class="model-select" id="convModels">
         <button class="model-btn sel" data-m="claude">Claude</button>
@@ -523,16 +587,16 @@
     <div class="result" id="convResult">
       <div class="savings">
         <div class="savings-pct" id="pct">0%</div>
-        <div class="savings-label" id="pctLabel">weniger Tokens als die Rohdatei</div>
+        <div class="savings-label" id="pctLabel"></div>
         <div class="token-row">
           <div class="token-box">
             <div class="token-num before" id="tokBefore">0</div>
-            <div class="token-cap">Rohdatei</div>
+            <div class="token-cap" id="tokBeforeCap">Rohdatei</div>
           </div>
           <div class="arrow">→</div>
           <div class="token-box">
             <div class="token-num after" id="tokAfter">0</div>
-            <div class="token-cap">optimiert</div>
+            <div class="token-cap" id="tokAfterCap">optimiert</div>
           </div>
         </div>
       </div>
@@ -540,7 +604,7 @@
       <div class="meta" id="meta"></div>
       <div class="note" id="note"></div>
 
-      <div class="preview-head"><span>Vorschau</span></div>
+      <div class="preview-head"><span id="previewLabel">Vorschau</span></div>
       <pre id="preview"></pre>
 
       <div class="actions">
@@ -554,26 +618,29 @@
   <div class="panel" id="panel-trainer">
 
     <div class="card" style="border-left: 3px solid var(--neo-b);">
-      <div style="font-size:13.5px; color:var(--ink-dim);">
-        <b style="color:var(--ink);">Was dieses Werkzeug macht (und was nicht):</b>
-        Es prueft die <b style="color:var(--ink);">Struktur</b> deines Prompts mit klaren Regeln
-        und zeigt dir mit Beispielen, was fehlt &mdash; damit du selbst besser wirst.
-        Es nutzt keine KI, erfindet nichts dazu und dein Prompt bleibt auf deinem Rechner.
-      </div>
+      <div style="font-size:13.5px; color:var(--ink-dim);" id="ptInfo"></div>
     </div>
 
-    <textarea id="promptInput" placeholder="Fuege hier deinen Prompt ein... &#10;&#10;z.B.: schreib mal was über hunde"></textarea>
+    <textarea id="promptInput" placeholder=""></textarea>
+
+    <!-- Demo-Buttons: sprachabhängige Beispiel-Prompts (schwach/mittel/stark) -->
+    <div class="demo-row">
+      <span class="demo-label" id="demoLabel">Beispiel laden:</span>
+      <button class="demo-btn weak" id="demoWeak" data-level="weak"><span class="demo-dot"></span><span class="demo-text">schwach</span></button>
+      <button class="demo-btn medium" id="demoMedium" data-level="medium"><span class="demo-dot"></span><span class="demo-text">mittel</span></button>
+      <button class="demo-btn strong" id="demoStrong" data-level="strong"><span class="demo-dot"></span><span class="demo-text">stark</span></button>
+    </div>
 
     <div class="card model-row" style="margin-top:14px;">
       <div>
-        <div class="label">Fuer welches KI-Modell?</div>
-        <div class="hint" id="ptModelHint">Claude mag XML-Tags (offizielle Anthropic-Empfehlung).</div>
+        <div class="label" id="ptModelLabel">Für welches KI-Modell?</div>
+        <div class="hint" id="ptModelHint"></div>
       </div>
       <div class="model-select" id="ptModels">
         <button class="model-btn sel" data-m="claude">Claude</button>
         <button class="model-btn" data-m="gpt">GPT</button>
         <button class="model-btn" data-m="gemini">Gemini</button>
-        <button class="model-btn" data-m="universal">universal</button>
+        <button class="model-btn" data-m="universal">Anderes</button>
       </div>
     </div>
 
@@ -592,32 +659,34 @@
           </svg>
           <div class="ring-center">
             <div class="score-big" id="scoreBig">0</div>
-            <div class="score-max">VON 100</div>
+            <div class="score-max" id="scoreMax">VON 100</div>
           </div>
         </div>
         <div class="score-text" id="scoreText"></div>
-        <div class="score-sub">Struktur-Punktzahl &mdash; regelbasiert, keine KI-Bewertung</div>
+        <div class="score-sub" id="scoreSub">Struktur-Punktzahl — regelbasiert, keine KI-Bewertung</div>
       </div>
+
+      <!-- Info-Box für das hinweis-Feld der Analyse (v1 zeigte es nie an) -->
+      <div class="info-box" id="ptHinweis"></div>
 
       <div id="checksList"></div>
 
-      <div class="tpl-head">
-        <span>Deine verbesserte Vorlage</span>
-      </div>
-      <div class="tpl-hint">
-        Die <b>[Fragen in Klammern]</b> beantwortest du selbst und ersetzt sie durch deine Angaben
-        &mdash; genau dabei lernst du, was einen guten Prompt ausmacht.
-      </div>
-      <pre id="tplOut"></pre>
-      <div class="actions">
-        <button class="primary" id="tplCopyBtn">Vorlage kopieren</button>
+      <!-- Vorlagen-Bereich: wird bei leerem Template komplett versteckt -->
+      <div id="tplSection">
+        <div class="tpl-head">
+          <span id="tplHead">Deine verbesserte Vorlage</span>
+        </div>
+        <div class="tpl-hint" id="tplHint"></div>
+        <pre id="tplOut"></pre>
+        <div class="actions">
+          <button class="primary" id="tplCopyBtn">Vorlage kopieren</button>
+          <button class="ghost" id="reanalyzeBtn">In Eingabe übernehmen</button>
+        </div>
       </div>
     </div>
   </div>
 
-  <footer>
-    Laeuft komplett auf deinem Rechner unter <code>localhost:8770</code>.
-    Keine Datei und kein Prompt verlaesst deinen PC.
+  <footer id="footerText">
   </footer>
 
 </div>
@@ -625,64 +694,267 @@
 <script>
   const REDUCED = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-  // Zahl hochzaehlen (respektiert reduced motion)
+  // ================= SPRACHE (DE/EN) =================
+  // Lokales Tool -> localStorage ist erlaubt und bewusst mit try/catch
+  // abgesichert (private Fenster / file:// können ihn blockieren).
+  function loadLang() {
+    try { return localStorage.getItem('kiw_lang') === 'en' ? 'en' : 'de'; }
+    catch (e) { return 'de'; }
+  }
+  function saveLang(l) {
+    try { localStorage.setItem('kiw_lang', l); } catch (e) { /* egal */ }
+  }
+  let lang = loadLang();
+
+  // Alle UI-Texte zweisprachig. applyLang() schreibt sie in die Elemente.
+  const I18N = {
+    de: {
+      brand: "// ki-werkstatt · lokal",
+      tabs: { konverter: "Datei-Konverter", trainer: "Prompt-Trainer" },
+      titles: {
+        konverter: {
+          h1: "Datei rein, effizientes Format raus.",
+          sub: 'Zieh ein <code>PDF</code>, <code>Word</code> oder <code>Excel</code> hinein. Fließtext wird zu Markdown, Tabellen zu CSV — passend verpackt für dein KI-Modell.'
+        },
+        trainer: {
+          h1: "Lerne, bessere Prompts zu schreiben.",
+          sub: 'Füge deinen Prompt ein und bekomme eine ehrliche Struktur-Bewertung mit Beispielen — plus eine Vorlage im richtigen Format für dein KI-Modell.'
+        }
+      },
+      dropMain: "Datei hierher ziehen oder klicken",
+      dropHint: "pdf · docx · xlsx · csv · txt · pptx",
+      convModelLabel: "Für welches KI-Modell verpacken?",
+      ptModelLabel: "Für welches KI-Modell?",
+      // Jargonfrei: keine "Delimiter", kein unerklärtes "Markdown"
+      modelHints: {
+        claude:    "Claude mag klar markierte Blöcke (XML-Tags) — offizielle Anthropic-Empfehlung.",
+        gpt:       "GPT mag klar getrennte Abschnitte mit Überschriften.",
+        gemini:    "Gemini kommt mit einer klaren, einfachen Gliederung am besten klar.",
+        none:      "Nur der saubere Inhalt, ohne Verpackung.",
+        universal: "Schlichte Struktur mit Beschriftungen — funktioniert bei jedem Modell."
+      },
+      modelBtnNone: "ohne",
+      modelBtnUniversal: "Anderes",
+      converting: (name, isPdf) => `Konvertiere „${name}“${isPdf ? ' (falls Bild-PDF, läuft OCR — kann ein paar Minuten dauern)' : ''} …`,
+      connError: "⚠ Verbindung zum Server fehlgeschlagen. Läuft app.py noch?",
+      unknownError: "Unbekannter Fehler.",
+      analyzeError: "Fehler bei der Analyse.",
+      pctLess: "weniger Tokens als die Rohdatei",
+      pctMore: "Datei war schon sauber — Struktur kostet minimal extra",
+      pctZero: "bereits optimales Format",
+      tokBeforeCap: "Rohdatei",
+      tokAfterCap: "optimiert",
+      methodExact: "tiktoken (exakt)",
+      methodEstimate: "Schätzung (~4 Zeichen/Token)",
+      chipFormat: "Format", chipCount: "Zählung", chipWrapFor: "Verpackt für",
+      chipWrapCost: "Verpackung", chipOcr: "OCR (Bild-PDF erkannt)",
+      modelNames: { claude: 'Claude (XML)', gpt: 'GPT (Markdown)', gemini: 'Gemini', none: 'ohne' },
+      previewLabel: "Vorschau",
+      downloadBtn: "Datei herunterladen",
+      copyBtn: "In Zwischenablage",
+      copied: "✓ Kopiert",
+      copyFail: "Kopieren nicht möglich (Browser-Berechtigung).",
+      ptInfo: '<b style="color:var(--ink);">Was dieses Werkzeug macht (und was nicht):</b> Es prüft die <b style="color:var(--ink);">Struktur</b> deines Prompts mit klaren Regeln und zeigt dir mit Beispielen, was fehlt — damit du selbst besser wirst. Es nutzt keine KI, erfindet nichts dazu und dein Prompt bleibt auf deinem Rechner.',
+      ptPlaceholder: "Füge hier deinen Prompt ein…\n\nz.B.: schreib mal was über hunde",
+      demoLabel: "Beispiel laden:",
+      demoBtns: { weak: "schwach", medium: "mittel", strong: "stark" },
+      analyzeBtn: "Prompt analysieren",
+      analyzing: "Analysiere …",
+      emptyPrompt: "Bitte gib zuerst einen Prompt ein.",
+      scoreMax: "VON 100",
+      scoreSub: "Struktur-Punktzahl — regelbasiert, keine KI-Bewertung",
+      optionalBadge: "optional",
+      tplHead: "Deine verbesserte Vorlage",
+      tplHint: 'Die <b>[Fragen in Klammern]</b> beantwortest du selbst und ersetzt sie durch deine Angaben — genau dabei lernst du, was einen guten Prompt ausmacht.',
+      tplCopyBtn: "Vorlage kopieren",
+      reanalyzeBtn: "In Eingabe übernehmen",
+      footer: 'Läuft komplett auf deinem Rechner unter <code>localhost:8770</code>. Keine Datei und kein Prompt verlässt deinen PC.'
+    },
+    en: {
+      brand: "// ki-werkstatt · local",
+      tabs: { konverter: "File Converter", trainer: "Prompt Trainer" },
+      titles: {
+        konverter: {
+          h1: "File in, efficient format out.",
+          sub: 'Drop a <code>PDF</code>, <code>Word</code> or <code>Excel</code> file. Prose becomes Markdown, tables become CSV — wrapped to fit your AI model.'
+        },
+        trainer: {
+          h1: "Learn to write better prompts.",
+          sub: 'Paste your prompt and get an honest structure review with examples — plus a template in the right format for your AI model.'
+        }
+      },
+      dropMain: "Drag a file here or click",
+      dropHint: "pdf · docx · xlsx · csv · txt · pptx",
+      convModelLabel: "Wrap for which AI model?",
+      ptModelLabel: "For which AI model?",
+      modelHints: {
+        claude:    "Claude likes clearly marked blocks (XML tags) — Anthropic's official recommendation.",
+        gpt:       "GPT likes clearly separated sections with headings.",
+        gemini:    "Gemini does best with a clear, simple structure.",
+        none:      "Just the clean content, no wrapping.",
+        universal: "Simple labelled structure — works with every model."
+      },
+      modelBtnNone: "none",
+      modelBtnUniversal: "Other",
+      converting: (name, isPdf) => `Converting “${name}”${isPdf ? ' (if it\'s an image PDF, OCR runs — may take a few minutes)' : ''} …`,
+      connError: "⚠ Connection to the server failed. Is app.py still running?",
+      unknownError: "Unknown error.",
+      analyzeError: "Error during analysis.",
+      pctLess: "fewer tokens than the raw file",
+      pctMore: "file was already clean — structure costs a tiny bit extra",
+      pctZero: "already an optimal format",
+      tokBeforeCap: "raw file",
+      tokAfterCap: "optimized",
+      methodExact: "tiktoken (exact)",
+      methodEstimate: "estimate (~4 chars/token)",
+      chipFormat: "Format", chipCount: "Counting", chipWrapFor: "Wrapped for",
+      chipWrapCost: "Wrapping", chipOcr: "OCR (image PDF detected)",
+      modelNames: { claude: 'Claude (XML)', gpt: 'GPT (Markdown)', gemini: 'Gemini', none: 'none' },
+      previewLabel: "Preview",
+      downloadBtn: "Download file",
+      copyBtn: "Copy to clipboard",
+      copied: "✓ Copied",
+      copyFail: "Copying not possible (browser permission).",
+      ptInfo: '<b style="color:var(--ink);">What this tool does (and does not do):</b> It checks the <b style="color:var(--ink);">structure</b> of your prompt with clear rules and shows you with examples what\'s missing — so you get better yourself. It uses no AI, invents nothing, and your prompt stays on your machine.',
+      ptPlaceholder: "Paste your prompt here…\n\ne.g.: write something about dogs",
+      demoLabel: "Load example:",
+      demoBtns: { weak: "weak", medium: "medium", strong: "strong" },
+      analyzeBtn: "Analyze prompt",
+      analyzing: "Analyzing …",
+      emptyPrompt: "Please enter a prompt first.",
+      scoreMax: "OUT OF 100",
+      scoreSub: "Structure score — rule-based, no AI judgement",
+      optionalBadge: "optional",
+      tplHead: "Your improved template",
+      tplHint: 'You answer the <b>[questions in brackets]</b> yourself and replace them with your details — that\'s exactly how you learn what makes a good prompt.',
+      tplCopyBtn: "Copy template",
+      reanalyzeBtn: "Use as input",
+      footer: 'Runs entirely on your machine at <code>localhost:8770</code>. No file and no prompt ever leaves your PC.'
+    }
+  };
+
+  // Sprachabhängige Demo-Prompts (identisch mit den Kalibrierungs-Referenzen
+  // in tests/test_block2.py: schwach=29/rot, mittel=48/gelb, stark=90/grün)
+  const DEMOS = {
+    de: {
+      weak: "schreib mal irgendwas über hunde oder so",
+      medium: "Erklär mir Photosynthese für mein Studium",
+      strong: "Du bist ein erfahrener Texter. Es geht um meinen Blog für Ersthundebesitzer. Schreibe einen Blogartikel über Leinentraining: maximal 600 Wörter, mit 3 Zwischenüberschriften und einer kurzen Checkliste am Ende."
+    },
+    en: {
+      weak: "write some stuff about dogs or whatever",
+      medium: "Explain photosynthesis for my biology class",
+      strong: "You are an experienced copywriter. My goal is to help first-time dog owners with my blog. Write a blog post about leash training: maximum 600 words, with 3 subheadings and a short checklist at the end."
+    }
+  };
+
+  const T = () => I18N[lang];
+  const LOCALE = () => lang === 'de' ? 'de-DE' : 'en-US';
+
+  function setText(id, value) { document.getElementById(id).textContent = value; }
+  function setHtml(id, value) { document.getElementById(id).innerHTML = value; }
+
+  // Schreibt ALLE statischen UI-Texte in der aktuellen Sprache.
+  function applyLang() {
+    const t = T();
+    document.documentElement.lang = lang;
+    setText('brand', t.brand);
+    setText('tabConv', t.tabs.konverter);
+    setText('tabTrainer', t.tabs.trainer);
+    // Titel je nach aktivem Tab
+    const activeTab = document.querySelector('.tab.active').dataset.tab;
+    setText('pageTitle', t.titles[activeTab].h1);
+    setHtml('pageSub', t.titles[activeTab].sub);
+    // Konverter
+    setText('dropMain', t.dropMain);
+    setText('dropHint', t.dropHint);
+    setText('convModelLabel', t.convModelLabel);
+    setText('tokBeforeCap', t.tokBeforeCap);
+    setText('tokAfterCap', t.tokAfterCap);
+    setText('previewLabel', t.previewLabel);
+    setText('downloadBtn', t.downloadBtn);
+    setText('copyBtn', t.copyBtn);
+    // Trainer
+    setHtml('ptInfo', t.ptInfo);
+    document.getElementById('promptInput').placeholder = t.ptPlaceholder;
+    setText('demoLabel', t.demoLabel);
+    document.querySelector('#demoWeak .demo-text').textContent = t.demoBtns.weak;
+    document.querySelector('#demoMedium .demo-text').textContent = t.demoBtns.medium;
+    document.querySelector('#demoStrong .demo-text').textContent = t.demoBtns.strong;
+    setText('ptModelLabel', t.ptModelLabel);
+    setText('analyzeBtn', t.analyzeBtn);
+    setText('scoreMax', t.scoreMax);
+    setText('scoreSub', t.scoreSub);
+    setText('tplHead', t.tplHead);
+    setHtml('tplHint', t.tplHint);
+    setText('tplCopyBtn', t.tplCopyBtn);
+    setText('reanalyzeBtn', t.reanalyzeBtn);
+    setHtml('footerText', t.footer);
+    // Modell-Buttons: 'ohne'/'Anderes' sind sprachabhängig
+    document.querySelector('#convModels [data-m="none"]').textContent = t.modelBtnNone;
+    document.querySelector('#ptModels [data-m="universal"]').textContent = t.modelBtnUniversal;
+    // Hint-Zeilen für die aktuell gewählten Modelle neu setzen
+    updateModelHint('convModels', 'convModelHint');
+    updateModelHint('ptModels', 'ptModelHint');
+    // Toggle-Optik
+    document.querySelectorAll('#langToggle .lang-btn').forEach(b =>
+      b.classList.toggle('sel', b.dataset.lang === lang));
+  }
+
+  document.querySelectorAll('#langToggle .lang-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      if (btn.dataset.lang === lang) return;
+      lang = btn.dataset.lang;
+      saveLang(lang);
+      applyLang();
+    });
+  });
+
+  // Zahl hochzählen (respektiert reduced motion)
   function countUp(el, target, dur = 800) {
-    if (REDUCED || target <= 0) { el.textContent = target.toLocaleString('de-DE'); return; }
+    if (REDUCED || target <= 0) { el.textContent = target.toLocaleString(LOCALE()); return; }
     const start = performance.now();
     function tick(now) {
       const p = Math.min(1, (now - start) / dur);
       const eased = 1 - Math.pow(1 - p, 3);
-      el.textContent = Math.round(target * eased).toLocaleString('de-DE');
+      el.textContent = Math.round(target * eased).toLocaleString(LOCALE());
       if (p < 1) requestAnimationFrame(tick);
     }
     requestAnimationFrame(tick);
   }
 
   // ================= TAB-NAVIGATION =================
-  const titles = {
-    konverter: {
-      h1: "Datei rein, effizientes Format raus.",
-      sub: 'Zieh ein <code>PDF</code>, <code>Word</code> oder <code>Excel</code> hinein. Fliesstext wird zu Markdown, Tabellen zu CSV &mdash; passend verpackt fuer dein KI-Modell.'
-    },
-    trainer: {
-      h1: "Lerne, bessere Prompts zu schreiben.",
-      sub: 'Fuege deinen Prompt ein und bekomme eine ehrliche Struktur-Bewertung mit Beispielen &mdash; plus eine Vorlage im richtigen Format fuer dein KI-Modell.'
-    }
-  };
   document.querySelectorAll('.tab').forEach(tab => {
     tab.addEventListener('click', () => {
       document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
       document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
       tab.classList.add('active');
       document.getElementById('panel-' + tab.dataset.tab).classList.add('active');
-      document.getElementById('pageTitle').textContent = titles[tab.dataset.tab].h1;
-      document.getElementById('pageSub').innerHTML = titles[tab.dataset.tab].sub;
+      setText('pageTitle', T().titles[tab.dataset.tab].h1);
+      setHtml('pageSub', T().titles[tab.dataset.tab].sub);
     });
   });
 
   // ================= MODELL-AUSWAHL (beide Tabs) =================
-  const modelHints = {
-    claude:    "Claude mag XML-Tags (offizielle Anthropic-Empfehlung).",
-    gpt:       "GPT-Modelle moegen Markdown-Ueberschriften und Delimiter.",
-    gemini:    "Gemini kommt mit klarer Markdown-Struktur am besten klar.",
-    none:      "Nur der saubere Inhalt, ohne Verpackung.",
-    universal: "Schlichte Struktur mit Labels - funktioniert bei jedem Modell."
-  };
+  function updateModelHint(containerId, hintId) {
+    const m = selectedModel(containerId);
+    document.getElementById(hintId).textContent = T().modelHints[m] || "";
+  }
   function setupModelSelect(containerId, hintId) {
     const box = document.getElementById(containerId);
     box.querySelectorAll('.model-btn').forEach(btn => {
       btn.addEventListener('click', () => {
         box.querySelectorAll('.model-btn').forEach(b => b.classList.remove('sel'));
         btn.classList.add('sel');
-        document.getElementById(hintId).textContent = modelHints[btn.dataset.m] || "";
+        updateModelHint(containerId, hintId);
       });
     });
   }
-  setupModelSelect('convModels', 'convModelHint');
-  setupModelSelect('ptModels', 'ptModelHint');
   function selectedModel(containerId) {
     return document.getElementById(containerId).querySelector('.model-btn.sel').dataset.m;
   }
+  setupModelSelect('convModels', 'convModelHint');
+  setupModelSelect('ptModels', 'ptModelHint');
 
   // ================= TAB 1: KONVERTER =================
   const drop = document.getElementById('drop');
@@ -708,8 +980,7 @@
 
   async function handleFile(file) {
     const isPdf = file.name.toLowerCase().endsWith('.pdf');
-    const hint = isPdf ? ' (falls Bild-PDF, laeuft OCR - kann ein paar Minuten dauern)' : '';
-    showStatus(convStatus, 'loading', `Konvertiere „${file.name}“${hint} …`);
+    showStatus(convStatus, 'loading', T().converting(file.name, isPdf));
     convResult.classList.remove('show');
 
     const form = new FormData();
@@ -719,10 +990,10 @@
     try {
       const res = await fetch('/convert', { method: 'POST', body: form });
       const data = await res.json();
-      if (!data.ok) { showStatus(convStatus, 'error', '⚠ ' + (data.error || 'Unbekannter Fehler.')); return; }
+      if (!data.ok) { showStatus(convStatus, 'error', '⚠ ' + (data.error || T().unknownError)); return; }
       renderConvResult(data);
     } catch (err) {
-      showStatus(convStatus, 'error', '⚠ Verbindung zum Server fehlgeschlagen. Laeuft app.py noch?');
+      showStatus(convStatus, 'error', T().connError);
     }
   }
 
@@ -731,6 +1002,7 @@
 
   function renderConvResult(d) {
     hideStatus(convStatus);
+    const t = T();
     const pctEl = document.getElementById('pct');
     const pctLabel = document.getElementById('pctLabel');
     const pct = d.percent_saved;
@@ -739,28 +1011,27 @@
     if (pct > 0.5) {
       pctEl.textContent = '−' + pct + '%';
       pctEl.className = 'savings-pct good';
-      pctLabel.textContent = 'weniger Tokens als die Rohdatei';
+      pctLabel.textContent = t.pctLess;
     } else if (pct < -0.5) {
       pctEl.textContent = '+' + Math.abs(pct) + '%';
       pctEl.className = 'savings-pct neutral';
-      pctLabel.textContent = 'Datei war schon sauber — Struktur kostet minimal extra';
+      pctLabel.textContent = t.pctMore;
     } else {
       pctEl.textContent = '≈0%';
       pctEl.className = 'savings-pct neutral';
-      pctLabel.textContent = 'bereits optimales Format';
+      pctLabel.textContent = t.pctZero;
     }
     countUp(document.getElementById('tokBefore'), d.tokens_before);
     countUp(document.getElementById('tokAfter'), d.tokens_after);
 
-    const method = d.token_method === 'tiktoken' ? 'tiktoken (exakt)' : 'Schaetzung (~4 Zeichen/Token)';
-    const modelNames = { claude: 'Claude (XML)', gpt: 'GPT (Markdown)', gemini: 'Gemini', none: 'ohne' };
+    const method = d.token_method === 'tiktoken' ? t.methodExact : t.methodEstimate;
     let chips = `
-      <span class="chip">Format: <b>${d.target_format.toUpperCase()}</b></span>
-      <span class="chip">Zaehlung: <b>${method}</b></span>
-      <span class="chip">Verpackt fuer: <b>${modelNames[d.target_model] || d.target_model}</b></span>
+      <span class="chip">${t.chipFormat}: <b>${d.target_format.toUpperCase()}</b></span>
+      <span class="chip">${t.chipCount}: <b>${method}</b></span>
+      <span class="chip">${t.chipWrapFor}: <b>${t.modelNames[d.target_model] || d.target_model}</b></span>
     `;
-    if (d.was_ocr) chips += `<span class="chip" style="border-color:var(--neo-b)">🔍 <b>OCR</b> (Bild-PDF erkannt)</span>`;
-    if (d.target_model !== 'none') chips += `<span class="chip">Verpackung: <b>+${d.wrap_overhead} Tokens</b></span>`;
+    if (d.was_ocr) chips += `<span class="chip" style="border-color:var(--neo-b)">🔍 <b>${t.chipOcr}</b></span>`;
+    if (d.target_model !== 'none') chips += `<span class="chip">${t.chipWrapCost}: <b>+${d.wrap_overhead} Tokens</b></span>`;
     document.getElementById('meta').innerHTML = chips;
 
     document.getElementById('note').textContent = d.note;
@@ -780,8 +1051,8 @@
     if (!lastFullText) return;
     try {
       await navigator.clipboard.writeText(lastFullText);
-      flashBtn('copyBtn', '✓ Kopiert');
-    } catch (e) { showStatus(convStatus, 'error', 'Kopieren nicht moeglich (Browser-Berechtigung).'); }
+      flashBtn('copyBtn', T().copied);
+    } catch (e) { showStatus(convStatus, 'error', T().copyFail); }
   });
 
   function flashBtn(id, text) {
@@ -798,26 +1069,50 @@
 
   document.getElementById('analyzeBtn').addEventListener('click', analyzePrompt);
 
+  // Demo-Buttons: Beispiel-Prompt (in UI-Sprache) laden und direkt analysieren
+  ['demoWeak', 'demoMedium', 'demoStrong'].forEach(id => {
+    document.getElementById(id).addEventListener('click', () => {
+      const level = document.getElementById(id).dataset.level;
+      document.getElementById('promptInput').value = DEMOS[lang][level];
+      analyzePrompt();
+    });
+  });
+
+  // Re-Analyse-Button: Vorlage zurück in die Eingabe (Lernschleife:
+  // analysieren -> Platzhalter ausfüllen -> erneut analysieren)
+  document.getElementById('reanalyzeBtn').addEventListener('click', () => {
+    const tpl = document.getElementById('tplOut').textContent;
+    if (!tpl) return;
+    const input = document.getElementById('promptInput');
+    input.value = tpl;
+    input.focus();
+    input.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  });
+
   async function analyzePrompt() {
     const prompt = document.getElementById('promptInput').value;
     if (!prompt.trim()) {
-      showStatus(ptStatus, 'error', 'Bitte gib zuerst einen Prompt ein.');
+      showStatus(ptStatus, 'error', T().emptyPrompt);
       return;
     }
-    showStatus(ptStatus, 'loading', 'Analysiere …');
+    showStatus(ptStatus, 'loading', T().analyzing);
     ptResult.classList.remove('show');
 
     try {
       const res = await fetch('/analyze_prompt', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: prompt, model: selectedModel('ptModels') })
+        body: JSON.stringify({
+          prompt: prompt,
+          model: selectedModel('ptModels'),
+          ui_lang: lang
+        })
       });
       const data = await res.json();
-      if (!data.ok) { showStatus(ptStatus, 'error', '⚠ ' + (data.error || 'Fehler bei der Analyse.')); return; }
+      if (!data.ok) { showStatus(ptStatus, 'error', '⚠ ' + (data.error || T().analyzeError)); return; }
       renderPtResult(data);
     } catch (err) {
-      showStatus(ptStatus, 'error', '⚠ Verbindung zum Server fehlgeschlagen. Laeuft app.py noch?');
+      showStatus(ptStatus, 'error', T().connError);
     }
   }
 
@@ -830,7 +1125,7 @@
     countUp(big, d.score, 900);
     document.getElementById('scoreText').textContent = d.ampel_text;
 
-    // Ring: erst leeren, dann im naechsten Frame auf Zielwert animieren
+    // Ring: erst leeren, dann im nächsten Frame auf Zielwert animieren
     const ring = document.getElementById('ringFg');
     ring.className.baseVal = 'ring-fg ' + d.ampel;
     ring.style.transition = 'none';
@@ -841,13 +1136,22 @@
       ring.style.strokeDashoffset = RING_LEN * (1 - d.score / 100);
     });
 
+    // hinweis-Feld als Info-Box (v1 hat es nie angezeigt)
+    const hintBox = document.getElementById('ptHinweis');
+    if (d.hinweis) {
+      hintBox.textContent = d.hinweis;
+      hintBox.classList.add('show');
+    } else {
+      hintBox.classList.remove('show');
+    }
+
     // Checks - Probleme zuerst, gestaffelt eingeblendet
     const list = document.getElementById('checksList');
     list.innerHTML = '';
     const sorted = [...(d.checks || [])].sort((a, b) => a.status - b.status);
     sorted.forEach((c, i) => {
       const dot = c.status >= 1 ? 'g' : (c.status >= 0.5 ? 'y' : 'r');
-      const optBadge = c.optional ? '<span class="check-opt">optional</span>' : '';
+      const optBadge = c.optional ? `<span class="check-opt">${T().optionalBadge}</span>` : '';
       const examples = c.status < 1 ? `
         <div class="check-ex">
           <div class="ex-row bad"><span class="ex-tag">✗</span><span>${escapeHtml(c.beispiel_schlecht)}</span></div>
@@ -869,7 +1173,10 @@
       list.appendChild(el);
     });
 
+    // Vorlagen-Bereich: bei leerem Template komplett verstecken
+    // (v1 zeigte bei Score 0 einen leeren Block samt Kopier-Button)
     document.getElementById('tplOut').textContent = d.template || '';
+    document.getElementById('tplSection').style.display = d.template ? '' : 'none';
 
     ptResult.classList.add('show');
     ptResult.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -880,13 +1187,16 @@
     if (!t) return;
     try {
       await navigator.clipboard.writeText(t);
-      flashBtn('tplCopyBtn', '✓ Kopiert');
-    } catch (e) { showStatus(ptStatus, 'error', 'Kopieren nicht moeglich (Browser-Berechtigung).'); }
+      flashBtn('tplCopyBtn', T().copied);
+    } catch (e) { showStatus(ptStatus, 'error', T().copyFail); }
   });
 
   function escapeHtml(s) {
     return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
   }
+
+  // Initiale Sprache anwenden (gespeicherte Wahl oder Deutsch)
+  applyLang();
 </script>
 </body>
 </html>
