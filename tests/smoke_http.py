@@ -85,6 +85,23 @@ def test_convert_unsupported():
         "Unbekannter Dateityp muss 400 liefern"
 
 
+def test_stats_endpoints():
+    """Statistik-Endpunkte: Roundtrip zaehlen -> lesen -> zuruecksetzen."""
+    r = requests.post(BASE + "/stats/reset", timeout=10)
+    assert r.status_code == 200 and r.json()["ok"]
+    r = requests.post(BASE + "/stats/count_file", timeout=10,
+                      json={"saved_tokens": 42, "format": "pdf"})
+    assert r.status_code == 200 and r.json()["ok"]
+    r = requests.post(BASE + "/stats/count_prompt", timeout=10,
+                      json={"score": 90, "ampel": "gruen"})
+    assert r.status_code == 200 and r.json()["ok"]
+    s = requests.get(BASE + "/stats", timeout=10).json()
+    assert s["files_converted"] == 1 and s["prompts_analyzed"] == 1
+    assert s["tokens_saved_total"] == 42 and s["best_score"] == 90
+    requests.post(BASE + "/stats/reset", timeout=10)
+    assert requests.get(BASE + "/stats", timeout=10).json()["files_converted"] == 0
+
+
 ALL_TESTS = [
     test_index,
     test_analyze_de,
@@ -92,6 +109,7 @@ ALL_TESTS = [
     test_analyze_error,
     test_convert_and_download,
     test_convert_unsupported,
+    test_stats_endpoints,
 ]
 
 if __name__ == "__main__":

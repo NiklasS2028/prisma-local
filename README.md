@@ -25,6 +25,20 @@ oben rechts, die Wahl wird gespeichert). Der Prompt-Trainer erkennt
 zusätzlich die Sprache deines Prompts und baut die Vorlage in dieser
 Sprache — unabhängig von der UI-Sprache.
 
+**Design:** Zwei Themes, umschaltbar oben rechts (☀/☾): ein helles
+Editorial-Theme (Standard — weiße Bühne, Gold-Akzente, Tiefblau) und das
+dunkle „Neon-Werkstatt"-Theme. Die Wahl wird gespeichert.
+
+**Statistik:** Ein dritter Tab zeigt, was Prisma für dich erledigt hat —
+bearbeitete Dateien, analysierte Prompts, gesparte Tokens (mit Seiten- und
+Kostenschätzung, klar als Schätzung gekennzeichnet), die Verteilung deiner
+Prompt-Scores, Meilensteine und die Format-Nutzung. Gezählt wird erst,
+wenn du ein Ergebnis wirklich nutzt (Download/Kopie), und pro Ergebnis nur
+einmal. **Datenschutz:** Deine Statistik wird nur lokal in `stats.json`
+gespeichert — ausschließlich Zahlen, keine Inhalte, keine Dateinamen, keine
+Prompt-Texte. Sie verlässt deinen PC nie und lässt sich im Tab jederzeit
+auf Null zurücksetzen.
+
 ## Installation (Windows)
 
 Voraussetzung: [Python 3.9+](https://www.python.org/downloads/)
@@ -94,13 +108,19 @@ das steht auch so in der Oberfläche.
 
 ## Tests
 
-Der Ordner `tests/` enthält drei Suiten, die ihre Testdateien selbst
-konstruieren (benötigt zusätzlich `reportlab`, `python-pptx`, `playwright`):
+Der Ordner `tests/` enthält mehrere Suiten, die ihre Testdateien selbst
+konstruieren (benötigt zusätzlich `reportlab`, `python-pptx`, `playwright`).
+Für alle außer den ersten beiden muss der Server laufen (`python app.py`):
 
 ```powershell
-python tests/test_block1.py    # Konverter (PDF/DOCX/XLSX/PPTX-Fixes)
-python tests/test_block2.py    # Prompt-Trainer (Regeln + Kalibrierung)
-python tests/test_block3_dom.py  # Browser-UI (erst "python app.py" starten)
+python tests/test_block1.py        # Konverter-Kern (PDF/DOCX/XLSX/PPTX)
+python tests/test_block2.py        # Prompt-Trainer (Regeln + Kalibrierung)
+python tests/smoke_http.py         # Endpunkt-Smoke inkl. Statistik
+python tests/test_block3_dom.py    # Browser-UI (Sprache, Demos, Lernschleife)
+python tests/test_blockB_dom.py    # Themes + WCAG-Kontraste
+python tests/test_blockC_stats.py  # Statistik-Backend (nur Zahlen)
+python tests/test_blockC_dom.py    # Statistik-UI + Zählregeln
+python tests/test_blockD_dom.py    # Layout-Stabilität + Konverter-Reset
 ```
 
 ## Lizenz
@@ -134,6 +154,19 @@ machine (`localhost:8770`); no file and no prompt ever leaves your PC.
 top right; the choice is remembered). The Prompt Trainer additionally
 detects the language of your prompt and builds the template in that
 language — independent of the UI language.
+
+**Design:** Two themes, toggled in the top right (☀/☾): a light editorial
+theme (default — white stage, gold accents, deep blue) and the dark
+"neon workshop" theme. Your choice is remembered.
+
+**Statistics:** A third tab shows what Prisma has done for you — files
+processed, prompts analyzed, tokens saved (with page and cost estimates,
+clearly labelled as estimates), the distribution of your prompt scores,
+milestones and format usage. Counting only happens when you actually use
+a result (download/copy), and only once per result. **Privacy:** Your
+statistics are stored locally in `stats.json` only — nothing but numbers,
+no content, no file names, no prompt texts. They never leave your PC and
+can be reset to zero in the tab at any time.
 
 ## Installation (Windows)
 
@@ -202,13 +235,19 @@ so, too.
 
 ## Tests
 
-The `tests/` folder contains three suites that construct their own test
-files (additionally require `reportlab`, `python-pptx`, `playwright`):
+The `tests/` folder contains several suites that construct their own test
+files (additionally require `reportlab`, `python-pptx`, `playwright`).
+All except the first two need the server running (`python app.py`):
 
 ```powershell
-python tests/test_block1.py    # converter (PDF/DOCX/XLSX/PPTX fixes)
-python tests/test_block2.py    # prompt trainer (rules + calibration)
-python tests/test_block3_dom.py  # browser UI (start "python app.py" first)
+python tests/test_block1.py        # converter core (PDF/DOCX/XLSX/PPTX)
+python tests/test_block2.py        # prompt trainer (rules + calibration)
+python tests/smoke_http.py         # endpoint smoke incl. statistics
+python tests/test_block3_dom.py    # browser UI (language, demos, learning loop)
+python tests/test_blockB_dom.py    # themes + WCAG contrasts
+python tests/test_blockC_stats.py  # statistics backend (numbers only)
+python tests/test_blockC_dom.py    # statistics UI + counting rules
+python tests/test_blockD_dom.py    # layout stability + converter reset
 ```
 
 ## License
