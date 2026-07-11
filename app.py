@@ -109,12 +109,21 @@ def _load_stats():
 
 
 def _save_stats(stats):
-    """Schreibt stats.json - Fehler duerfen die Kernfunktion nie stoppen."""
+    """Schreibt stats.json ATOMAR: erst vollstaendig in eine .tmp-Datei im
+    selben Verzeichnis, dann os.replace (atomar auf NTFS). Ein Absturz
+    mitten im Schreiben kann so nie die bestehende Datei zerstoeren.
+    Fehler duerfen die Kernfunktion nie stoppen."""
+    tmp_path = STATS_PATH + ".tmp"
     try:
-        with open(STATS_PATH, "w", encoding="utf-8") as f:
+        with open(tmp_path, "w", encoding="utf-8") as f:
             json.dump(stats, f, indent=2)
-    except OSError:
-        pass
+        os.replace(tmp_path, STATS_PATH)
+    except Exception:
+        # Original bleibt unberuehrt; .tmp-Rest best effort entfernen
+        try:
+            os.remove(tmp_path)
+        except OSError:
+            pass
 
 
 @app.errorhandler(413)

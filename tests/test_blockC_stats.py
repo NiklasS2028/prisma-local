@@ -167,6 +167,47 @@ def test_foreign_keys_are_dropped():
     assert s["best_score"] == 100, "best_score muss auf 0..100 geklemmt werden"
 
 
+def test_atomic_save_survives_write_failure():
+    """Block F.3: Schreibfehler mitten im json.dump darf die bestehende
+    stats.json NIE zerstoeren (tmp + os.replace). Direkt-Import von app,
+    json.dump wird per Monkeypatch zum Scheitern gebracht."""
+    reset()
+    assert count_file(77, "pdf").json()["ok"]  # bekannter Zustand auf Platte
+    with open(STATS_PATH, "r", encoding="utf-8") as f:
+        before = f.read()
+
+    root = os.path.dirname(STATS_PATH)
+    if root not in sys.path:
+        sys.path.insert(0, root)
+    import app as app_module
+
+    def boom(*_a, **_k):
+        raise OSError("simulierter Schreibfehler")
+
+    orig_dump = app_module.json.dump
+    app_module.json.dump = boom
+    try:
+        app_module._save_stats({"files_converted": 999})
+    finally:
+        app_module.json.dump = orig_dump
+
+    with open(STATS_PATH, "r", encoding="utf-8") as f:
+        after = f.read()
+    assert after == before, "stats.json wurde trotz Schreibfehler verändert"
+    assert json.loads(after)["files_converted"] == 1, "Inhalt nicht mehr lesbar"
+    assert not os.path.exists(STATS_PATH + ".tmp"), ".tmp-Rest blieb liegen"
+
+
+def test_atomic_save_leaves_no_tmp():
+    """Erfolgsfall: nach jedem Zaehl-Event existiert keine .tmp-Datei."""
+    reset()
+    assert count_file(5, "txt").json()["ok"]
+    assert count_prompt(48, "gelb").json()["ok"]
+    assert not os.path.exists(STATS_PATH + ".tmp"), ".tmp nach Erfolg übrig"
+    s = get_stats()
+    assert s["files_converted"] == 1 and s["prompts_analyzed"] == 1
+
+
 def test_reset():
     reset()
     count_file(100, "pdf")
@@ -189,6 +230,8 @@ ALL_TESTS = [
     test_stats_file_numbers_only,
     test_corrupt_stats_file_survives,
     test_foreign_keys_are_dropped,
+    test_atomic_save_survives_write_failure,
+    test_atomic_save_leaves_no_tmp,
     test_reset,
 ]
 
