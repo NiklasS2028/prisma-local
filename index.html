@@ -69,23 +69,25 @@
     --head: var(--disp);       /* Überschriften-Schrift (hell: Serif) */
   }
 
-  /* Helles Theme "Prisma": elegant, ruhig - Gold + Tiefblau auf warmem
-     Off-White, Serif-Überschriften, weiche Schatten statt Neon-Glow. */
+  /* Helles Theme "Prisma": Museum / Luxus-Editorial.
+     Reines, kühles Weiß als Bühne, sattes Gold als Edel-Akzent (sparsam!),
+     Tiefblau als ruhiger Anker. Serif-Headline in Gold, weiche Schatten. */
   html[data-theme="light"] {
-    --bg:        #faf8f4;
+    --bg:        #fcfcfd;      /* reines, leicht kühles Weiß - kein Creme */
     --panel:     #ffffff;
-    --panel-2:   #f2eee5;
-    --line:      #e3ddcf;
-    --line-hi:   #c9bfa8;
+    --panel-2:   #f7f8fa;      /* kühl-grau abgesetzte Flächen */
+    --line:      #e6e8ec;
+    --line-hi:   #b9bfca;
     --ink:       #1a1a1f;
-    --ink-dim:   #6d7078;
+    --ink-dim:   #61656f;
 
-    --neo-a:     #b8933a;      /* gedämpftes, wertiges Gold */
-    --neo-b:     #274b7a;      /* tiefes Königsblau */
-    --neo-a-rgb: 184,147,58;
+    --neo-a:     #c9a227;      /* sattes Rahmen-Gold (Akzente/Flächenränder) */
+    --neo-b:     #274b7a;      /* tiefes Königsblau - der Anker */
+    --neo-a-rgb: 201,162,39;
     --neo-b-rgb: 39,75,122;
+    --gold-ink:  #a8861d;      /* text-taugliches, tieferes Gold (>=3:1 auf Weiß) */
     --grad:       linear-gradient(135deg, #1e3a5f, #2f5e97);   /* Buttons: Tiefblau */
-    --grad-brand: linear-gradient(135deg, #b8933a, #274b7a);   /* Logo: Gold -> Blau */
+    --grad-brand: linear-gradient(135deg, #c9a227, #1e3a5f);   /* Logo: Gold -> Blau */
     --on-grad:   #ffffff;
 
     /* Ampel kräftiger/dunkler, damit sie auf hellem Grund lesbar bleibt */
@@ -96,12 +98,12 @@
     --ex-bad-ink: #991b1b;
     --ex-good-ink: #14532d;
 
-    --code-bg:   #f6f3eb;
+    --code-bg:   #f7f8fa;
     --code-ink:  #2a2d34;
-    --placeholder: #a09a8c;
+    --placeholder: #9aa0ab;
 
-    --grid-line: rgba(30,58,95,.05);
-    --card-shadow: 0 1px 3px rgba(26,26,31,.04), 0 10px 28px rgba(30,58,95,.07);
+    --grid-line: transparent;  /* kein Raster im hellen Theme (Notizblock-Look) */
+    --card-shadow: 0 2px 6px rgba(23,32,48,.06), 0 16px 40px rgba(23,32,48,.10);
 
     --accent:    #274b7a;
     --head: "Fraunces", Georgia, "Times New Roman", serif;
@@ -591,12 +593,30 @@
      Das dunkle Theme lebt vom Neon-Glow; das helle bekommt stattdessen
      weiche, dezente Schatten und mehr Ruhe.
   ----------------------------------------------------------------*/
+  /* Ruhige weiße Bühne: KEIN Raster, nur ein extrem subtiler kühler
+     Vertikal-Verlauf plus ein Hauch Gold ganz oben. */
+  html[data-theme="light"] .grid-bg { display: none; }
   html[data-theme="light"] .ambient {
     background:
-      radial-gradient(600px 420px at 12% -5%,  rgba(184,147,58,.09), transparent 60%),
-      radial-gradient(700px 500px at 105% 90%, rgba(39,75,122,.07), transparent 60%);
+      radial-gradient(900px 320px at 50% -12%, rgba(201,162,39,.05), transparent 60%),
+      linear-gradient(180deg, #ffffff 0%, rgba(247,248,250,.6) 100%);
+    animation: none;
   }
-  html[data-theme="light"] h1 { letter-spacing: 0; }  /* Serif braucht kein negatives Tracking */
+  /* Der zentrale Editorial-Moment: große Serif-Headline in Gold auf Weiß */
+  html[data-theme="light"] h1 {
+    color: var(--gold-ink);
+    font-size: 38px;
+    font-weight: 600;
+    letter-spacing: 0;
+  }
+  /* Goldene Haarlinien gliedern die Bereiche */
+  html[data-theme="light"] .tabs { border-bottom-color: rgba(201,162,39,.35); }
+  html[data-theme="light"] .tab.active::after {
+    background: linear-gradient(90deg, #c9a227, #a8861d);
+  }
+  html[data-theme="light"] footer { border-top-color: rgba(201,162,39,.35); }
+  /* Score-Ring: goldene Laufbahn (die Füllung behält die Ampel-Semantik) */
+  html[data-theme="light"] .ring-bg { stroke: rgba(201,162,39,.18); }
   html[data-theme="light"] button.primary {
     box-shadow: 0 3px 12px rgba(30,58,95,.22), 0 1px 0 rgba(255,255,255,.12) inset;
   }
@@ -629,6 +649,7 @@
   @media (max-width: 560px) {
     body { padding: 26px 14px 44px; }
     h1 { font-size: 25px; }
+    html[data-theme="light"] h1 { font-size: 29px; }
     .savings-pct { font-size: 44px; }
     .ring-wrap { width: 136px; height: 136px; }
     .ring-wrap svg { width: 136px; height: 136px; }

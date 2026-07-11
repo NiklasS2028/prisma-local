@@ -82,7 +82,7 @@ def test_default_is_light(page):
     theme = page.evaluate("document.documentElement.dataset.theme")
     assert theme == "light", f"Default-Theme ist '{theme}', erwartet 'light'"
     bg = style(page, "body", "background-color")
-    assert _parse_rgb(bg) == (250, 248, 244), f"Heller Hintergrund fehlt: {bg}"
+    assert _parse_rgb(bg) == (252, 252, 253), f"Kühles Weiß fehlt: {bg}"
     sel = page.locator('#themeToggle .lang-btn[data-theme="light"]').get_attribute("class")
     assert "sel" in sel, "Hell-Button nicht als aktiv markiert"
 
@@ -100,7 +100,7 @@ def test_toggle_and_persistence(page):
     # und zurück
     set_theme(page, "light")
     assert page.evaluate("localStorage.getItem('prisma_theme')") == "light"
-    assert _parse_rgb(style(page, "body", "background-color")) == (250, 248, 244)
+    assert _parse_rgb(style(page, "body", "background-color")) == (252, 252, 253)
 
 
 def test_dark_theme_unchanged(page):
@@ -117,9 +117,27 @@ def test_light_serif_heading(page):
     font = style(page, "#pageTitle", "font-family")
     assert "Fraunces" in font or "Georgia" in font, \
         f"Serif-Überschrift fehlt im hellen Theme: {font}"
+    # Editorial-Moment: Headline in text-tauglichem Gold (#a8861d)
+    color = style(page, "#pageTitle", "color")
+    assert _parse_rgb(color) == (168, 134, 29), f"Headline nicht golden: {color}"
+    # Gold auf Weiß muss fuer grosse Schrift >=3:1 halten
+    ratio = contrast(color, style(page, "body", "background-color"))
+    assert ratio >= 3.0, f"Gold-Headline unter 3:1: {ratio:.2f}"
     set_theme(page, "dark")
     font = style(page, "#pageTitle", "font-family")
     assert "Space Grotesk" in font, f"Dunkles Theme muss Space Grotesk behalten: {font}"
+    assert _parse_rgb(style(page, "#pageTitle", "color")) == (234, 238, 245), \
+        "Dunkle Headline-Farbe verändert"
+
+
+def test_light_no_grid_pattern(page):
+    """Kein Raster-Muster im hellen Theme (Notizblock-Look) - dunkel behält es."""
+    set_theme(page, "light")
+    assert style(page, ".grid-bg", "display") == "none", \
+        "Gitternetz im hellen Theme noch sichtbar"
+    set_theme(page, "dark")
+    assert style(page, ".grid-bg", "display") != "none", \
+        "Gitternetz im dunklen Theme verschwunden"
 
 
 def _render_trainer_result(page):
@@ -227,6 +245,7 @@ ALL_TESTS = [
     test_toggle_and_persistence,
     test_dark_theme_unchanged,
     test_light_serif_heading,
+    test_light_no_grid_pattern,
     test_contrast_light,
     test_contrast_dark,
     test_screenshots_both_themes,
