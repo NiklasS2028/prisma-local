@@ -25,7 +25,9 @@ Ein eigener Test (`tests/test_privacy.py`) beweist das bei jedem Testlauf.
    verpackt passend für dein KI-Modell (Claude → XML-Tags, GPT →
    Markdown-Abschnitte, Gemini → klare Gliederung). Bild-PDFs und
    gemischte PDFs (Text + Scans) werden automatisch per **OCR** erkannt,
-   seitenweise, damit nichts verloren geht.
+   seitenweise, damit nichts verloren geht. Die Ergebnisleiste mit
+   Download, **„Ordner öffnen"**, Kopieren und „Neue Datei" bleibt beim
+   Scrollen sichtbar.
 2. **Prompt-Trainer**: bewertet die **Struktur** eines Prompts mit
    nachvollziehbaren Regeln (bewusst **keine KI**), zeigt einen Score
    (0-100) mit Ampel, erklärt jeden Check mit ✗/✓-Beispielen und baut eine
@@ -86,6 +88,19 @@ Dann **http://localhost:8770** öffnen — beenden mit `Strg + C`.
 Der Server läuft auf Port 8770 und bindet ausschließlich auf 127.0.0.1;
 er ist aus dem Netzwerk nicht erreichbar.
 
+## Wo landen die Ergebnisse?
+
+Jedes Konvertierungs-Ergebnis wird im Projektordner unter `outputs/`
+abgelegt — der Button **„Ordner öffnen"** (in der Ergebnisleiste und im
+Statistik-Tab unter „Ausgaben verwalten") führt direkt dorthin.
+
+Der Browser-Download („Datei herunterladen") ist eine **zusätzliche
+Kopie**; wohin sie gespeichert wird, bestimmt eine
+**Browser-Einstellung**, nicht Prisma — eine lokale Web-App kann den
+Download-Ort nicht wählen. Wenn du einen festen Zielordner willst:
+in den Browser-Einstellungen den Download-Speicherort festlegen bzw.
+„Vor jedem Download fragen" ausschalten.
+
 ## Datenschutz
 
 - **Keine externen Verbindungen.** Auch die Schriften sind lokal
@@ -114,7 +129,7 @@ Token-Zählung ist ohne `tiktoken` eine deklarierte Schätzung.
 
 ## Tests
 
-106 Tests in 9 Suiten, die ihre Testdateien selbst konstruieren
+116 Tests in 10 Suiten, die ihre Testdateien selbst konstruieren
 (zusätzlich benötigt: `reportlab`, `playwright`). Für alle außer den
 ersten beiden muss der Server laufen (`python app.py`):
 
@@ -128,6 +143,7 @@ python tests/test_blockC_stats.py  # Statistik-Backend (nur Zahlen, atomar, Orig
 python tests/test_blockC_dom.py    # Statistik-UI + Zählregeln + Ausgaben-Verwaltung
 python tests/test_blockD_dom.py    # Layout-Stabilität + Konverter-Reset
 python tests/test_privacy.py       # Null externe Verbindungen (Beweis)
+python tests/test_blockG_dom.py    # Ergebnisleiste + Ordner-öffnen-Button
 ```
 
 ## Lizenz
@@ -158,7 +174,8 @@ and no prompt ever leaves your PC. A dedicated test
    wrapped to fit your AI model (Claude → XML tags, GPT → Markdown
    sections, Gemini → clear structure). Image PDFs and mixed PDFs
    (text + scans) are detected automatically and processed with **OCR**,
-   page by page, so nothing gets lost.
+   page by page, so nothing gets lost. The result bar with download,
+   **"Open folder"**, copy and "New file" stays visible while scrolling.
 2. **Prompt Trainer**: rates the **structure** of a prompt with
    transparent rules (deliberately **no AI**), shows a score (0-100) with
    a traffic light, explains every check with ✗/✓ examples and builds a
@@ -215,6 +232,18 @@ Then open **http://localhost:8770** — quit with `Ctrl + C`.
 The server runs on port 8770 and binds to 127.0.0.1 only; it is not
 reachable from the network.
 
+## Where do the results go?
+
+Every conversion result is stored in the project folder under
+`outputs/` — the **"Open folder"** button (in the result bar and in the
+stats tab under "Manage outputs") takes you straight there.
+
+The browser download ("Download file") is an **additional copy**; where
+it is saved is controlled by a **browser setting**, not by Prisma — a
+local web app cannot choose the download location. If you want a fixed
+target folder: set the download location in your browser settings or
+disable "Ask where to save each file".
+
 ## Privacy
 
 - **No external connections.** Even the fonts are bundled locally
@@ -242,7 +271,7 @@ is a declared estimate.
 
 ## Tests
 
-106 tests in 9 suites that construct their own test files (additionally
+116 tests in 10 suites that construct their own test files (additionally
 required: `reportlab`, `playwright`). All except the first two need the
 server running (`python app.py`) — see the German section for the list.
 
