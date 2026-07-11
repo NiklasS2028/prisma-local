@@ -15,11 +15,47 @@
 </script>
 <!-- Schriften: Space Grotesk (Display) + JetBrains Mono (Zahlen/Code) +
      Fraunces (Serif-Überschriften im hellen Theme).
-     Fällt ohne Internet sauber auf System-Schriften zurück. -->
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@500;700&family=Fraunces:opsz,wght@9..144,600;9..144,700&display=swap" rel="stylesheet">
+     Lokal gebündelt (static/fonts/, SIL OFL) - kein externer Request. -->
 <style>
+  /* Lokale Schriften (Variable Fonts, latin-Subset). Eine Datei je Familie,
+     ein @font-face-Block je genutztem Gewicht - Quelle: Google Fonts CSS2,
+     Lizenzen: static/fonts/OFL-*.txt */
+  @font-face {
+    font-family: 'Space Grotesk'; font-style: normal; font-weight: 500;
+    font-display: swap;
+    src: url("/static/fonts/SpaceGrotesk-var.woff2") format("woff2");
+  }
+  @font-face {
+    font-family: 'Space Grotesk'; font-style: normal; font-weight: 600;
+    font-display: swap;
+    src: url("/static/fonts/SpaceGrotesk-var.woff2") format("woff2");
+  }
+  @font-face {
+    font-family: 'Space Grotesk'; font-style: normal; font-weight: 700;
+    font-display: swap;
+    src: url("/static/fonts/SpaceGrotesk-var.woff2") format("woff2");
+  }
+  @font-face {
+    font-family: 'JetBrains Mono'; font-style: normal; font-weight: 500;
+    font-display: swap;
+    src: url("/static/fonts/JetBrainsMono-var.woff2") format("woff2");
+  }
+  @font-face {
+    font-family: 'JetBrains Mono'; font-style: normal; font-weight: 700;
+    font-display: swap;
+    src: url("/static/fonts/JetBrainsMono-var.woff2") format("woff2");
+  }
+  @font-face {
+    font-family: 'Fraunces'; font-style: normal; font-weight: 600;
+    font-display: swap;
+    src: url("/static/fonts/Fraunces-var.woff2") format("woff2");
+  }
+  @font-face {
+    font-family: 'Fraunces'; font-style: normal; font-weight: 700;
+    font-display: swap;
+    src: url("/static/fonts/Fraunces-var.woff2") format("woff2");
+  }
+
   /* ---------------------------------------------------------------
      Design v2: "Neon-Werkstatt".
      Signatur: Grün->Cyan-Neon-Duo + animierter Score-Ring.
