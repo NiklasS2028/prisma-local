@@ -847,6 +847,7 @@
 
       <div class="actions sticky-actions" id="convActions">
         <button class="primary" id="downloadBtn">Datei herunterladen</button>
+        <button class="ghost open-folder-btn">Ordner öffnen</button>
         <button class="ghost" id="copyBtn">In Zwischenablage</button>
         <button class="ghost" id="convResetBtn">Neue Datei</button>
       </div>
@@ -978,6 +979,7 @@
       <div class="stat-head" id="outTitle">Ausgaben verwalten</div>
       <div class="stat-sub" id="outInfo" style="margin-top:0;"></div>
       <div class="actions" style="margin-top:14px;">
+        <button class="ghost open-folder-btn">Ordner öffnen</button>
         <button class="ghost" id="outputsClearBtn">Gespeicherte Ausgaben löschen</button>
       </div>
     </div>
@@ -1135,6 +1137,7 @@
       outInfoEmpty: "Keine gespeicherten Ausgabedateien.",
       outputsClearBtn: "Gespeicherte Ausgaben löschen",
       outputsClearConfirm: "Wirklich? Erneut klicken zum Bestätigen",
+      openFolderBtn: "Ordner öffnen",
     },
     en: {
       brand: "prisma · local",
@@ -1231,6 +1234,7 @@
       outInfoEmpty: "No stored output files.",
       outputsClearBtn: "Delete stored outputs",
       outputsClearConfirm: "Sure? Click again to confirm",
+      openFolderBtn: "Open folder",
     }
   };
 
@@ -1308,6 +1312,9 @@
     setText('outTitle', t.outTitle);
     outClearArmed = false;
     setText('outputsClearBtn', t.outputsClearBtn);
+    document.querySelectorAll('.open-folder-btn').forEach(b => {
+      b.textContent = t.openFolderBtn;
+    });
     if (lastStats) renderStats(lastStats);  // dynamische Texte neu aufbauen
     if (lastOutInfo) renderOutputsInfo(lastOutInfo);
     // Modell-Buttons: 'ohne'/'Anderes' sind sprachabhängig
@@ -1806,6 +1813,14 @@
       await fetch('/outputs/clear', { method: 'POST' });
     } catch (e) { /* Server weg */ }
     refreshOutputs();
+  });
+
+  // --- "Ordner öffnen": beide Buttons (Ergebnisleiste + Ausgaben-Karte)
+  //     nutzen denselben Endpoint. Öffnet den outputs-Ordner im Explorer. ---
+  document.querySelectorAll('.open-folder-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      fetch('/outputs/open', { method: 'POST' }).catch(() => {});
+    });
   });
 
   // --- Zähl-Event Konverter (einmal pro Ergebnis, erst bei echter Nutzung) ---

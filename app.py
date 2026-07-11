@@ -366,6 +366,31 @@ def outputs_clear():
     return jsonify({"ok": True, "removed": removed})
 
 
+@app.route("/outputs/open", methods=["POST"])
+def outputs_open():
+    """Oeffnet den outputs-Ordner im Datei-Explorer. Das ist ein
+    OS-Seiteneffekt, den ein Cross-Site-POST sonst spammen koennte -
+    deshalb origin-geprueft (F.4-Helper). Auf Systemen ohne os.startfile
+    (Nicht-Windows) kommt eine ehrliche JSON-Fehlermeldung statt Absturz."""
+    denied = _check_origin()
+    if denied:
+        return denied
+    try:
+        os.makedirs(OUTPUT_DIR, exist_ok=True)
+        if not hasattr(os, "startfile"):
+            return jsonify({
+                "ok": False,
+                "error": "Ordner-Oeffnen wird nur unter Windows unterstuetzt.",
+            }), 501
+        os.startfile(OUTPUT_DIR)
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({
+            "ok": False,
+            "error": f"Ordner konnte nicht geoeffnet werden: {e}",
+        }), 500
+
+
 @app.route("/download/<out_id>")
 def download(out_id):
     """Liefert eine fertige Ausgabedatei zum Herunterladen."""

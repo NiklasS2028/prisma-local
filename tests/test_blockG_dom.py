@@ -150,6 +150,47 @@ def test_screenshots_result_both_themes(page):
         assert os.path.getsize(shot) > 10000
 
 
+# ---------------------------------------------------------------------------
+# G.2: "ORDNER OEFFNEN"-BUTTON
+# ---------------------------------------------------------------------------
+
+def test_open_folder_buttons_bilingual(page):
+    """Je ein Button in der Ergebnisleiste und in der Ausgaben-Karte,
+    Texte folgen der UI-Sprache."""
+    upload_long_txt(page, "blockg_folder.txt")
+    bar_btn = page.locator("#convActions .open-folder-btn")
+    assert bar_btn.count() == 1 and bar_btn.is_visible(), \
+        "Button fehlt in der Ergebnisleiste"
+    assert bar_btn.inner_text() == "Ordner öffnen"
+    page.click("#tabStats")
+    page.wait_for_timeout(600)
+    card_btn = page.locator("#panel-stats .open-folder-btn")
+    assert card_btn.count() == 1 and card_btn.is_visible(), \
+        "Button fehlt in der Ausgaben-Karte"
+    page.click('#langToggle .lang-btn[data-lang="en"]')
+    page.wait_for_timeout(200)
+    assert card_btn.inner_text() == "Open folder"
+    page.click("#tabConv")
+    assert bar_btn.inner_text() == "Open folder"
+
+
+def test_open_folder_click_posts(page):
+    """Klick feuert POST /outputs/open - abgefangen per Route-Intercept,
+    damit im Testlauf kein echtes Explorer-Fenster aufgeht."""
+    posts = []
+
+    def intercept(route):
+        posts.append(route.request.method)
+        route.fulfill(status=200, content_type="application/json",
+                      body='{"ok": true}')
+
+    page.route("**/outputs/open", intercept)
+    upload_long_txt(page, "blockg_click.txt")
+    page.click("#convActions .open-folder-btn")
+    page.wait_for_timeout(400)
+    assert posts == ["POST"], f"Kein/falscher Request: {posts}"
+
+
 ALL_TESTS = [
     test_bar_reachable_without_scroll,
     test_bar_stays_while_scrolling,
@@ -157,6 +198,8 @@ ALL_TESTS = [
     test_bar_background_opaque_both_themes,
     test_no_horizontal_jump_with_result,
     test_screenshots_result_both_themes,
+    test_open_folder_buttons_bilingual,
+    test_open_folder_click_posts,
 ]
 
 if __name__ == "__main__":

@@ -285,6 +285,61 @@ def test_outputs_clear_origin_check():
     requests.post(BASE + "/outputs/clear", timeout=10)  # aufraeumen
 
 
+def test_outputs_open_calls_startfile():
+    """Block G.2: /outputs/open legt den Ordner an und oeffnet ihn per
+    os.startfile - per Monkeypatch, damit im Testlauf KEIN echtes
+    Explorer-Fenster aufgeht (Flask test_client, nicht der Live-Server)."""
+    root = os.path.dirname(STATS_PATH)
+    if root not in sys.path:
+        sys.path.insert(0, root)
+    import app as app_module
+
+    calls = []
+    orig_makedirs = os.makedirs
+    orig_startfile = getattr(os, "startfile", None)
+    os.makedirs = lambda p, exist_ok=False: calls.append(("makedirs", p))
+    os.startfile = lambda p: calls.append(("startfile", p))
+    try:
+        client = app_module.app.test_client()
+        r = client.post("/outputs/open")
+        assert r.status_code == 200 and r.get_json()["ok"], \
+            f"Endpoint fehlgeschlagen: {r.status_code} {r.get_json()}"
+    finally:
+        os.makedirs = orig_makedirs
+        if orig_startfile is not None:
+            os.startfile = orig_startfile
+        else:
+            del os.startfile
+    assert calls == [("makedirs", app_module.OUTPUT_DIR),
+                     ("startfile", app_module.OUTPUT_DIR)], \
+        f"Falsche Aufruf-Reihenfolge/Pfade: {calls}"
+
+
+def test_outputs_open_origin_check():
+    """Block G.2: fremder Origin -> 403 (gegen den Live-Server, gefahrlos,
+    weil der Check VOR dem Oeffnen greift); erlaubter/kein Origin -> 200
+    (per test_client mit gepatchtem startfile, kein Explorer-Fenster)."""
+    r = requests.post(BASE + "/outputs/open", timeout=10,
+                      headers={"Origin": "https://angreifer.example"})
+    assert r.status_code == 403, f"Fremder Origin nicht abgewehrt: {r.status_code}"
+
+    import app as app_module
+    orig_startfile = getattr(os, "startfile", None)
+    os.startfile = lambda p: None
+    try:
+        client = app_module.app.test_client()
+        r = client.post("/outputs/open",
+                        headers={"Origin": "http://localhost:8770"})
+        assert r.status_code == 200, "Eigener Origin muss erlaubt sein"
+        r = client.post("/outputs/open")
+        assert r.status_code == 200, "Fehlender Origin muss erlaubt sein"
+    finally:
+        if orig_startfile is not None:
+            os.startfile = orig_startfile
+        else:
+            del os.startfile
+
+
 def test_reset():
     reset()
     count_file(100, "pdf")
@@ -313,6 +368,8 @@ ALL_TESTS = [
     test_atomic_save_leaves_no_tmp,
     test_outputs_info_and_clear,
     test_outputs_clear_origin_check,
+    test_outputs_open_calls_startfile,
+    test_outputs_open_origin_check,
     test_reset,
 ]
 

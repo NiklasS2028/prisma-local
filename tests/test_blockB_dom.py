@@ -215,6 +215,12 @@ def _check_contrasts(page, theme):
         problems.append(f"[{theme}] Ergebnis-Note: {ratio:.2f} < 4.5")
     else:
         print(f"        [{theme}] Ergebnis-Note: Kontrast {ratio:.2f} (min 4.5)")
+    # Block G.2: "Ordner öffnen"-Button in der Ergebnisleiste
+    fg = style(page, "#convActions .open-folder-btn", "color")
+    bg = style(page, "#convActions .open-folder-btn", "background-color")
+    if "0)" in bg.replace(" ", "") and "rgba" in bg:
+        bg = style(page, "#convActions", "background-color")
+    check("Ordner-öffnen-Button (Ergebnisleiste)", fg, bg, 4.5)
     # Block F.5: neue Elemente "Ausgaben verwalten" im Statistik-Tab
     page.click("#tabStats")
     page.wait_for_timeout(900)
