@@ -230,6 +230,26 @@ def test_role_example_has_material():
         f"Rollen-Beispiel ohne Material-Platzhalter: {role['beispiel_gut']}"
 
 
+def test_no_good_example_teaches_input_mistake():
+    """KEIN Gut-Beispiel (egal welcher Check, Sprache oder Domäne) darf den
+    Fehler vormachen, den der Input-Check anmahnt: Transformationsverb ohne
+    Material. Ein Gut-Beispiel mit 'Verbessere...' braucht einen
+    [Platzhalter] oder echtes Material."""
+    from prompt_trainer import EXAMPLES, _TRANSFORM_RX, _has_input_material, _word_count
+    violations = []
+    for lang, domains in EXAMPLES.items():
+        for domain, checks in domains.items():
+            for check_id, (_bad, good) in checks.items():
+                low = good.lower()
+                if _TRANSFORM_RX.search(low):
+                    has_placeholder = "[" in good
+                    has_material = _has_input_material(low, _word_count(low))
+                    if not (has_placeholder or has_material):
+                        violations.append(f"{lang}/{domain}/{check_id}: {good}")
+    assert not violations, \
+        "Gut-Beispiele mit Transformationsverb ohne Material:\n" + "\n".join(violations)
+
+
 # ---------------------------------------------------------------------------
 # HINWEIS-FELD UND FEHLERFÄLLE
 # ---------------------------------------------------------------------------
@@ -307,6 +327,7 @@ ALL_TESTS = [
     test_move_tip_when_role_inline,
     test_no_move_tip_without_inline_parts,
     test_role_example_has_material,
+    test_no_good_example_teaches_input_mistake,
     test_hinweis_on_near_empty_prompt,
     test_empty_prompt_error,
     test_signature_defaults,
