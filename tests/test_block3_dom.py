@@ -133,6 +133,51 @@ def test_reanalyze_button(page):
     page.wait_for_selector(".pt-result.show", timeout=5000)
 
 
+def test_reanalyze_check1_template_roundtrip(page):
+    """Re-Analyse-Check 1: Vorlage landet in der Eingabe und die erneute
+    Analyse der (noch unausgefüllten) Vorlage läuft fehlerfrei durch."""
+    page.click('#tabTrainer')
+    page.click("#demoWeak")
+    page.wait_for_selector(".pt-result.show", timeout=5000)
+    tpl = page.locator("#tplOut").inner_text()
+    page.click("#reanalyzeBtn")
+    assert page.locator("#promptInput").input_value() == tpl, \
+        "Eingabefeld enthält nicht exakt die Vorlage"
+    page.click("#analyzeBtn")
+    page.wait_for_selector(".pt-result.show", timeout=5000)
+    assert page.locator("#scoreBig").inner_text() != "", "Re-Analyse liefert kein Ergebnis"
+
+
+def test_reanalyze_check2_learning_loop_improves_score(page):
+    """Re-Analyse-Check 2: Die Lernschleife wirkt. Schwacher Prompt (29/rot)
+    -> Vorlage übernehmen -> Platzhalter ausfüllen (wie ein Nutzer es täte)
+    -> erneut analysieren -> Score springt auf grün (90)."""
+    page.click('#tabTrainer')
+    page.click("#demoWeak")
+    page.wait_for_selector(".pt-result.show", timeout=5000)
+    page.wait_for_timeout(1200)
+    assert page.locator("#scoreBig").inner_text() == "29", "Ausgangsscore nicht 29"
+    page.click("#reanalyzeBtn")
+    assert "<task>" in page.locator("#promptInput").input_value(), "Vorlage fehlt in der Eingabe"
+    # Nutzer füllt die [Platzhalter-Fragen] aus und konkretisiert die Aufgabe
+    filled = (
+        "<role>\nDu bist ein erfahrener Hundetrainer.\n</role>\n\n"
+        "<context>\nIch schreibe einen Blogartikel für meinen Hunde-Blog, "
+        "Zielgruppe sind Ersthundebesitzer.\n</context>\n\n"
+        "<task>\nSchreibe einen 300-Wörter-Überblick über die 5 wichtigsten "
+        "Punkte der Welpenerziehung.\n</task>\n\n"
+        "<format>\nAls nummerierte Liste mit je 2-3 Sätzen pro Punkt.\n</format>"
+    )
+    page.fill("#promptInput", filled)
+    page.click("#analyzeBtn")
+    page.wait_for_selector(".pt-result.show", timeout=5000)
+    page.wait_for_timeout(1200)
+    score = int(page.locator("#scoreBig").inner_text())
+    klass = page.locator("#scoreBig").get_attribute("class")
+    assert score >= 75, f"Lernschleife hebt den Score nicht auf grün (Score {score})"
+    assert "gruen" in klass, f"Ampel nicht grün: {klass}"
+
+
 def test_hinweis_hidden_after_normal_prompt(page):
     page.click('#tabTrainer')
     page.click("#demoMedium")
@@ -163,6 +208,8 @@ ALL_TESTS = [
     test_demo_buttons_language_dependent,
     test_hinweis_box_and_hidden_template,
     test_reanalyze_button,
+    test_reanalyze_check1_template_roundtrip,
+    test_reanalyze_check2_learning_loop_improves_score,
     test_hinweis_hidden_after_normal_prompt,
     test_converter_regression,
 ]

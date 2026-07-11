@@ -1,0 +1,16 @@
+# KI-Werkstatt - Laufzeit-Abhaengigkeiten
+# Installation:  pip install -r requirements.txt
+
+flask           # lokaler Webserver (app.py)
+pdfplumber      # PDF-Text- und Tabellen-Extraktion
+python-docx     # Word-Dokumente
+openpyxl        # Excel-Dateien
+markitdown      # PowerPoint -> Markdown
+python-pptx     # PPTX-Sprechernotizen-Erkennung (und markitdown-Unterbau)
+tiktoken        # exakte Token-Zaehlung (optional - ohne greift die Schaetzung)
+pdf2image       # OCR-Kette: PDF-Seiten -> Bilder (braucht poppler)
+pytesseract     # OCR-Kette: Texterkennung (braucht Tesseract)
+
+# Nur fuer die Test-Suiten (tests/) zusaetzlich noetig:
+#   pip install reportlab python-pptx playwright
+#   python -m playwright install chromium
