@@ -486,6 +486,18 @@
     text-transform: uppercase; letter-spacing: 1px;
   }
   .actions { display: flex; gap: 10px; margin-top: 16px; flex-wrap: wrap; }
+  /* Ergebnisleiste im Konverter: klebt am unteren Viewport-Rand, solange
+     das Ergebnis im Blick ist - Download ohne Scrollen durch die Vorschau.
+     Deckender Theme-Hintergrund + Kante oben, damit durchscrollender
+     Vorschautext darunter lesbar bleibt. Im Leerzustand unsichtbar, weil
+     #convResult ohne .show display:none ist. */
+  .sticky-actions {
+    position: sticky; bottom: 0; z-index: 5;
+    background: var(--bg);
+    margin-top: 12px; padding: 12px 2px;
+    border-top: 1px solid var(--line);
+    box-shadow: 0 -10px 18px -10px rgba(0, 0, 0, .30);
+  }
 
   /* ================= TAB 2: PROMPT-TRAINER ================= */
   textarea {
@@ -833,7 +845,7 @@
       <div class="preview-head"><span id="previewLabel">Vorschau</span></div>
       <pre id="preview"></pre>
 
-      <div class="actions">
+      <div class="actions sticky-actions" id="convActions">
         <button class="primary" id="downloadBtn">Datei herunterladen</button>
         <button class="ghost" id="copyBtn">In Zwischenablage</button>
         <button class="ghost" id="convResetBtn">Neue Datei</button>
