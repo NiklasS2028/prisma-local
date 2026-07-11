@@ -182,6 +182,51 @@ def test_empty_state(page):
     assert "Noch keine" in line, f"Leerzustand des Donuts fehlt: {line}"
 
 
+def outputs_info():
+    return requests.get(BASE + "/outputs/info", timeout=10).json()
+
+
+def test_outputs_manage_two_step(page):
+    """Block F.5: 'Ausgaben verwalten' - Anzeige + zweistufiges Löschen,
+    erster Klick schaltet nur scharf, Timeout entschärft wieder."""
+    requests.post(BASE + "/outputs/clear", timeout=10)
+    upload_txt(page, "f5_outputs.txt")   # erzeugt genau eine Ausgabedatei
+    assert outputs_info()["count"] == 1
+    page.click("#tabStats")
+    page.wait_for_timeout(800)
+    info_text = page.locator("#outInfo").inner_text()
+    assert "1" in info_text and ("B" in info_text or "KB" in info_text), \
+        f"Anzahl/Größe fehlen: {info_text}"
+    btn = page.locator("#outputsClearBtn")
+    original_label = btn.inner_text()
+    # Erster Klick: nur scharf schalten, noch nichts löschen
+    btn.click()
+    assert btn.inner_text() != original_label, "Sicherheitsabfrage fehlt"
+    assert outputs_info()["count"] == 1, "Erster Klick hat schon gelöscht!"
+    # Timeout: nach 4s wieder entschärft
+    page.wait_for_timeout(4300)
+    assert btn.inner_text() == original_label, "Timer entschärft nicht"
+    assert outputs_info()["count"] == 1
+    # Scharf schalten + bestätigen: jetzt wird gelöscht
+    btn.click()
+    btn.click()
+    page.wait_for_timeout(600)
+    assert outputs_info()["count"] == 0, "Löschen hat nicht gewirkt"
+    empty_text = page.locator("#outInfo").inner_text()
+    assert empty_text != info_text and "Keine" in empty_text, \
+        f"Leerzustand fehlt: {empty_text}"
+
+
+def test_outputs_manage_english(page):
+    requests.post(BASE + "/outputs/clear", timeout=10)
+    page.click('#langToggle .lang-btn[data-lang="en"]')
+    page.click("#tabStats")
+    page.wait_for_timeout(800)
+    assert page.locator("#outTitle").inner_text() == "Manage outputs"
+    assert page.locator("#outputsClearBtn").inner_text() == "Delete stored outputs"
+    assert "No stored" in page.locator("#outInfo").inner_text()
+
+
 def test_screenshots_stats_both_themes(page):
     server_reset()
     requests.post(BASE + "/stats/count_file", json={"saved_tokens": 84000, "format": "pdf"})
@@ -206,6 +251,8 @@ ALL_TESTS = [
     test_stats_tab_english,
     test_reset_two_step,
     test_empty_state,
+    test_outputs_manage_two_step,
+    test_outputs_manage_english,
     test_screenshots_stats_both_themes,
 ]
 

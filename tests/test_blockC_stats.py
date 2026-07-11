@@ -239,6 +239,52 @@ def test_atomic_save_leaves_no_tmp():
     assert s["files_converted"] == 1 and s["prompts_analyzed"] == 1
 
 
+def _make_output_file():
+    """Erzeugt ueber /convert eine echte Ausgabedatei in outputs/."""
+    import io
+    r = requests.post(BASE + "/convert", timeout=30,
+                      files={"file": ("f5_probe.txt",
+                                      io.BytesIO(b"Inhalt fuer Block-F5-Test."))},
+                      data={"target_model": "none"})
+    assert r.status_code == 200 and r.json()["ok"]
+    return r.json()["download_id"]
+
+
+def test_outputs_info_and_clear():
+    """Block F.5: /outputs/info liefert NUR Zahlen, /outputs/clear loescht
+    alles und alte Download-Links laufen in den bestehenden 404-Pfad."""
+    r = requests.post(BASE + "/outputs/clear", timeout=10)
+    assert r.status_code == 200 and r.json()["ok"]
+    info = requests.get(BASE + "/outputs/info", timeout=10).json()
+    assert info == {"count": 0, "total_bytes": 0}, f"Leerzustand: {info}"
+
+    dl_id = _make_output_file()
+    _make_output_file()
+    info = requests.get(BASE + "/outputs/info", timeout=10).json()
+    assert set(info.keys()) == {"count", "total_bytes"}, "Fremde Schlüssel im Payload"
+    assert all(isinstance(v, int) and not isinstance(v, bool)
+               for v in info.values()), f"Nicht nur Zahlen: {info}"
+    assert info["count"] == 2 and info["total_bytes"] > 0
+
+    r = requests.post(BASE + "/outputs/clear", timeout=10)
+    assert r.json()["removed"] == 2, f"removed: {r.json()}"
+    info = requests.get(BASE + "/outputs/info", timeout=10).json()
+    assert info["count"] == 0 and info["total_bytes"] == 0
+    r = requests.get(f"{BASE}/download/{dl_id}", timeout=10)
+    assert r.status_code == 404, "Geloeschte Ausgabe muss im 404-Pfad landen"
+
+
+def test_outputs_clear_origin_check():
+    """Block F.5: auch /outputs/clear wehrt Cross-Site-POSTs ab."""
+    _make_output_file()
+    r = requests.post(BASE + "/outputs/clear", timeout=10,
+                      headers={"Origin": "https://angreifer.example"})
+    assert r.status_code == 403, f"Fremder Origin nicht abgewehrt: {r.status_code}"
+    info = requests.get(BASE + "/outputs/info", timeout=10).json()
+    assert info["count"] >= 1, "403 darf nicht loeschen"
+    requests.post(BASE + "/outputs/clear", timeout=10)  # aufraeumen
+
+
 def test_reset():
     reset()
     count_file(100, "pdf")
@@ -265,6 +311,8 @@ ALL_TESTS = [
     test_origin_check_count_endpoints,
     test_atomic_save_survives_write_failure,
     test_atomic_save_leaves_no_tmp,
+    test_outputs_info_and_clear,
+    test_outputs_clear_origin_check,
     test_reset,
 ]
 

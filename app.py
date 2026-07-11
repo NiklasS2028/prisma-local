@@ -126,6 +126,26 @@ def _save_stats(stats):
             pass
 
 
+def _remove_files_in(dirpath):
+    """Loescht alle Dateien DIREKT in dirpath (Unterordner und der Ordner
+    selbst bleiben). Gibt die Anzahl geloeschter Dateien zurueck;
+    Fehler stoppen nichts."""
+    removed = 0
+    try:
+        names = os.listdir(dirpath)
+    except OSError:
+        return 0
+    for name in names:
+        path = os.path.join(dirpath, name)
+        if os.path.isfile(path):
+            try:
+                os.remove(path)
+                removed += 1
+            except OSError:
+                pass
+    return removed
+
+
 # Origins, von denen zustandsaendernde POSTs akzeptiert werden (die eigene UI)
 _ALLOWED_ORIGINS = {"http://127.0.0.1:8770", "http://localhost:8770"}
 
@@ -315,6 +335,37 @@ def stats_reset():
         return jsonify({"ok": True, "stats": stats})
 
 
+@app.route("/outputs/info")
+def outputs_info():
+    """Anzahl + Gesamtgroesse der gespeicherten Ausgabedateien.
+    NUR Zahlen, keine Dateinamen - die Datenschutz-Regel der Statistik
+    gilt auch hier."""
+    count = 0
+    total = 0
+    try:
+        for name in os.listdir(OUTPUT_DIR):
+            path = os.path.join(OUTPUT_DIR, name)
+            if os.path.isfile(path):
+                count += 1
+                total += os.path.getsize(path)
+    except OSError:
+        pass
+    return jsonify({"count": count, "total_bytes": total})
+
+
+@app.route("/outputs/clear", methods=["POST"])
+def outputs_clear():
+    """Loescht alle gespeicherten Ausgabedateien. Die zweistufige
+    Bestaetigung passiert im Client; serverseitig schuetzt der Origin-Check
+    vor Cross-Site-POSTs. Alte Download-Links laufen danach in den
+    bestehenden 404-Pfad von /download."""
+    denied = _check_origin()
+    if denied:
+        return denied
+    removed = _remove_files_in(OUTPUT_DIR)
+    return jsonify({"ok": True, "removed": removed})
+
+
 @app.route("/download/<out_id>")
 def download(out_id):
     """Liefert eine fertige Ausgabedatei zum Herunterladen."""
@@ -331,8 +382,12 @@ def download(out_id):
 
 if __name__ == "__main__":
     port = 8770
+    # Verwaiste Upload-Reste entfernen (bleiben nur nach hartem Abbruch
+    # mitten in einer Konvertierung liegen - normal wird sofort geloescht).
+    purged = _remove_files_in(UPLOAD_DIR)
     print("=" * 60)
     print("  PRISMA laeuft!")
+    print(f"  Upload-Reste geloescht: {purged}")
     print(f"  Oeffne im Browser:  http://localhost:{port}")
     print(f"  Max. Dateigroesse:  {MAX_MB} MB")
     print("  Beenden mit:        Strg + C")

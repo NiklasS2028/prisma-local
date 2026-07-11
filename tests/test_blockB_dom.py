@@ -215,6 +215,17 @@ def _check_contrasts(page, theme):
         problems.append(f"[{theme}] Ergebnis-Note: {ratio:.2f} < 4.5")
     else:
         print(f"        [{theme}] Ergebnis-Note: Kontrast {ratio:.2f} (min 4.5)")
+    # Block F.5: neue Elemente "Ausgaben verwalten" im Statistik-Tab
+    page.click("#tabStats")
+    page.wait_for_timeout(900)
+    fg = style(page, "#outInfo", "color")
+    bg = style(page, "#panel-stats .card:last-of-type", "background-color")
+    check("Ausgaben-Info auf Karte", fg, bg, 4.5)
+    fg = style(page, "#outputsClearBtn", "color")
+    bg = style(page, "#outputsClearBtn", "background-color")
+    if "0)" in bg.replace(" ", "") and "rgba" in bg:
+        bg = style(page, "body", "background-color")
+    check("Ausgaben-Löschen-Button", fg, bg, 4.5)
     assert not problems, "Kontrast-Probleme:\n" + "\n".join(problems)
 
 

@@ -962,6 +962,14 @@
       <div id="formatBars"></div>
     </div>
 
+    <div class="card">
+      <div class="stat-head" id="outTitle">Ausgaben verwalten</div>
+      <div class="stat-sub" id="outInfo" style="margin-top:0;"></div>
+      <div class="actions" style="margin-top:14px;">
+        <button class="ghost" id="outputsClearBtn">Gespeicherte Ausgaben löschen</button>
+      </div>
+    </div>
+
     <div class="note" id="statsPrivacy"></div>
 
     <div class="actions">
@@ -1110,6 +1118,11 @@
       statsPrivacy: "Deine Statistik wird nur lokal auf deinem Rechner gespeichert — ausschließlich Zahlen, keine Inhalte, keine Dateinamen. Sie verlässt deinen PC nie.",
       statsResetBtn: "Statistik zurücksetzen",
       statsResetConfirm: "Wirklich? Erneut klicken zum Bestätigen",
+      outTitle: "Ausgaben verwalten",
+      outInfo: (n, size) => `${n} gespeicherte Ausgabedatei(en), ${size} — deine Konvertierungs-Ergebnisse im Ordner outputs, damit Downloads auch später noch funktionieren.`,
+      outInfoEmpty: "Keine gespeicherten Ausgabedateien.",
+      outputsClearBtn: "Gespeicherte Ausgaben löschen",
+      outputsClearConfirm: "Wirklich? Erneut klicken zum Bestätigen",
     },
     en: {
       brand: "prisma · local",
@@ -1201,6 +1214,11 @@
       statsPrivacy: "Your statistics are stored locally on your machine only — nothing but numbers, no content, no file names. They never leave your PC.",
       statsResetBtn: "Reset statistics",
       statsResetConfirm: "Sure? Click again to confirm",
+      outTitle: "Manage outputs",
+      outInfo: (n, size) => `${n} stored output file(s), ${size} — your conversion results in the outputs folder, so downloads keep working later.`,
+      outInfoEmpty: "No stored output files.",
+      outputsClearBtn: "Delete stored outputs",
+      outputsClearConfirm: "Sure? Click again to confirm",
     }
   };
 
@@ -1275,7 +1293,11 @@
     setText('statsPrivacy', t.statsPrivacy);
     resetArmed = false;
     setText('statsResetBtn', t.statsResetBtn);
+    setText('outTitle', t.outTitle);
+    outClearArmed = false;
+    setText('outputsClearBtn', t.outputsClearBtn);
     if (lastStats) renderStats(lastStats);  // dynamische Texte neu aufbauen
+    if (lastOutInfo) renderOutputsInfo(lastOutInfo);
     // Modell-Buttons: 'ohne'/'Anderes' sind sprachabhängig
     document.querySelector('#convModels [data-m="none"]').textContent = t.modelBtnNone;
     document.querySelector('#ptModels [data-m="universal"]').textContent = t.modelBtnUniversal;
@@ -1636,6 +1658,7 @@
       lastStats = await res.json();
       renderStats(lastStats);
     } catch (e) { /* Server weg - alte Anzeige stehen lassen */ }
+    refreshOutputs();  // Ausgaben-Info im selben Zug aktualisieren
   }
 
   function renderDonut(r, y, g) {
@@ -1722,6 +1745,55 @@
       await fetch('/stats/reset', { method: 'POST' });
     } catch (e) { /* Server weg */ }
     refreshStats();
+  });
+
+  // --- Ausgaben verwalten (gespeicherte Konvertierungs-Ergebnisse) ---
+  // Der Server liefert NUR Zahlen (Anzahl + Bytes), nie Dateinamen.
+  let lastOutInfo = null;
+
+  function formatBytes(b) {
+    if (b < 1024) return `${b} B`;
+    if (b < 1024 * 1024) return `${(b / 1024).toLocaleString(LOCALE(), { maximumFractionDigits: 1 })} KB`;
+    return `${(b / (1024 * 1024)).toLocaleString(LOCALE(), { maximumFractionDigits: 1 })} MB`;
+  }
+
+  function renderOutputsInfo(info) {
+    const t = T();
+    document.getElementById('outInfo').textContent =
+      info.count === 0
+        ? t.outInfoEmpty
+        : t.outInfo(info.count.toLocaleString(LOCALE()), formatBytes(info.total_bytes));
+  }
+
+  async function refreshOutputs() {
+    try {
+      const res = await fetch('/outputs/info');
+      lastOutInfo = await res.json();
+      renderOutputsInfo(lastOutInfo);
+    } catch (e) { /* Server weg - alte Anzeige stehen lassen */ }
+  }
+
+  // Löschen mit Sicherheitsabfrage - exakt das Muster des Statistik-Resets
+  let outClearArmed = false;
+  let outClearTimer = null;
+  document.getElementById('outputsClearBtn').addEventListener('click', async () => {
+    const btn = document.getElementById('outputsClearBtn');
+    if (!outClearArmed) {
+      outClearArmed = true;
+      btn.textContent = T().outputsClearConfirm;
+      outClearTimer = setTimeout(() => {
+        outClearArmed = false;
+        btn.textContent = T().outputsClearBtn;
+      }, 4000);
+      return;
+    }
+    clearTimeout(outClearTimer);
+    outClearArmed = false;
+    btn.textContent = T().outputsClearBtn;
+    try {
+      await fetch('/outputs/clear', { method: 'POST' });
+    } catch (e) { /* Server weg */ }
+    refreshOutputs();
   });
 
   // --- Zähl-Event Konverter (einmal pro Ergebnis, erst bei echter Nutzung) ---
