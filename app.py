@@ -13,8 +13,10 @@ Start:  python app.py
 """
 
 import os
+import json
 import uuid
 import tempfile
+import threading
 
 from flask import Flask, request, jsonify, send_file, Response
 
@@ -38,6 +40,81 @@ app.config["MAX_CONTENT_LENGTH"] = MAX_MB * 1024 * 1024
 
 # HTML-Oberflaeche liegt als separate Datei daneben
 INDEX_PATH = os.path.join(BASE_DIR, "index.html")
+
+# ---------------------------------------------------------------------------
+# LOKALE STATISTIK (stats.json)
+# ---------------------------------------------------------------------------
+# HARTE REGEL: Diese Datei speichert AUSSCHLIESSLICH aggregierte Zahlen.
+# Niemals Dateinamen, Prompt-Texte, Dokumentinhalte oder Zeitstempel mit
+# Bezug zu konkreten Aktionen. Das Versprechen "nichts verlaesst den PC,
+# nichts wird inhaltlich protokolliert" haengt an dieser Regel.
+
+STATS_PATH = os.path.join(BASE_DIR, "stats.json")
+_STATS_LOCK = threading.Lock()
+
+_DEFAULT_STATS = {
+    "files_converted": 0,
+    "prompts_analyzed": 0,
+    "tokens_saved_total": 0,
+    "score_buckets": {"red": 0, "yellow": 0, "green": 0},
+    "best_score": 0,
+    "format_counts": {"pdf": 0, "docx": 0, "xlsx": 0, "csv": 0,
+                      "txt": 0, "pptx": 0},
+}
+
+
+def _fresh_stats():
+    """Tiefe Kopie der Null-Struktur."""
+    return json.loads(json.dumps(_DEFAULT_STATS))
+
+
+def _clean_int(value, lo=0, hi=None):
+    """Akzeptiert nur echte Zahlen (kein bool), klemmt auf [lo, hi]."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return lo
+    n = int(value)
+    if n < lo:
+        n = lo
+    if hi is not None and n > hi:
+        n = hi
+    return n
+
+
+def _load_stats():
+    """Liest stats.json defensiv: fehlende/kaputte Datei oder fremde
+    Schluessel fuehren NIE zum Crash - es zaehlt nur die bekannte
+    Nur-Zahlen-Struktur, alles andere wird verworfen."""
+    try:
+        with open(STATS_PATH, "r", encoding="utf-8") as f:
+            raw = json.load(f)
+        if not isinstance(raw, dict):
+            raise ValueError("stats.json ist kein Objekt")
+    except Exception:
+        return _fresh_stats()
+
+    clean = _fresh_stats()
+    clean["files_converted"] = _clean_int(raw.get("files_converted"))
+    clean["prompts_analyzed"] = _clean_int(raw.get("prompts_analyzed"))
+    clean["tokens_saved_total"] = _clean_int(raw.get("tokens_saved_total"))
+    clean["best_score"] = _clean_int(raw.get("best_score"), 0, 100)
+    buckets = raw.get("score_buckets") or {}
+    for key in clean["score_buckets"]:
+        clean["score_buckets"][key] = _clean_int(
+            buckets.get(key) if isinstance(buckets, dict) else 0)
+    formats = raw.get("format_counts") or {}
+    for key in clean["format_counts"]:
+        clean["format_counts"][key] = _clean_int(
+            formats.get(key) if isinstance(formats, dict) else 0)
+    return clean
+
+
+def _save_stats(stats):
+    """Schreibt stats.json - Fehler duerfen die Kernfunktion nie stoppen."""
+    try:
+        with open(STATS_PATH, "w", encoding="utf-8") as f:
+            json.dump(stats, f, indent=2)
+    except OSError:
+        pass
 
 
 @app.errorhandler(413)
@@ -138,6 +215,64 @@ def analyze():
     result = analyze_prompt(prompt, model, ui_lang=ui_lang)
     status = 200 if result.get("ok") else 400
     return jsonify(result), status
+
+
+@app.route("/stats")
+def stats_get():
+    """Liefert die lokale Statistik (nur aggregierte Zahlen)."""
+    with _STATS_LOCK:
+        return jsonify(_load_stats())
+
+
+@app.route("/stats/count_file", methods=["POST"])
+def stats_count_file():
+    """
+    Zaehl-Event des Clients: Der Nutzer hat ein Konvertierungs-Ergebnis
+    wirklich GENUTZT (Download oder Zwischenablage). Der Client schickt
+    das Event pro Ergebnis nur einmal. Payload: nur Zahlen + Format-Kategorie.
+    """
+    data = request.get_json(silent=True) or {}
+    saved = _clean_int(data.get("saved_tokens"))
+    fmt = str(data.get("format", "")).lower()
+    fmt = {"xlsm": "xlsx", "md": "txt"}.get(fmt, fmt)
+    with _STATS_LOCK:
+        stats = _load_stats()
+        stats["files_converted"] += 1
+        stats["tokens_saved_total"] += saved
+        if fmt in stats["format_counts"]:
+            stats["format_counts"][fmt] += 1
+        _save_stats(stats)
+        return jsonify({"ok": True, "stats": stats})
+
+
+@app.route("/stats/count_prompt", methods=["POST"])
+def stats_count_prompt():
+    """
+    Zaehl-Event des Clients: eine Prompt-Analyse (pro Prompt-Inhalt nur
+    einmal - die Dopplungs-Entscheidung trifft der Client).
+    Payload: nur Score-Zahl + Ampel-Kategorie, NIE der Prompt selbst.
+    """
+    data = request.get_json(silent=True) or {}
+    score = _clean_int(data.get("score"), 0, 100)
+    bucket = {"rot": "red", "gelb": "yellow", "gruen": "green"}.get(data.get("ampel"))
+    if bucket is None:
+        return jsonify({"ok": False, "error": "Unbekannte Ampel-Farbe."}), 400
+    with _STATS_LOCK:
+        stats = _load_stats()
+        stats["prompts_analyzed"] += 1
+        stats["score_buckets"][bucket] += 1
+        stats["best_score"] = max(stats["best_score"], score)
+        _save_stats(stats)
+        return jsonify({"ok": True, "stats": stats})
+
+
+@app.route("/stats/reset", methods=["POST"])
+def stats_reset():
+    """Setzt die Statistik auf Null (Bestaetigung passiert im Client)."""
+    with _STATS_LOCK:
+        stats = _fresh_stats()
+        _save_stats(stats)
+        return jsonify({"ok": True, "stats": stats})
 
 
 @app.route("/download/<out_id>")

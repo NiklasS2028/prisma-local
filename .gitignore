@@ -9,6 +9,9 @@ venv/
 uploads/
 outputs/
 
+# Lokale Statistik (nur Zahlen) - gehoert nicht ins Repo, jeder startet bei Null
+stats.json
+
 # Von den Tests generierte Testdateien
 tests/fixtures/
 

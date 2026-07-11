@@ -1,0 +1,208 @@
+# -*- coding: utf-8 -*-
+"""
+test_blockC_stats.py
+--------------------
+Backend-Tests für Block C (Statistik) gegen den laufenden Server.
+
+Geprüft wird:
+  - GET /stats liefert die Null-Struktur
+  - count_file / count_prompt zählen korrekt (inkl. Klemmen negativer Werte,
+    best_score-Logik, Format-Mapping xlsm->xlsx / md->txt)
+  - ungültige Ampel-Farbe -> 400
+  - stats.json enthält AUSSCHLIESSLICH Zahlen (rekursiv geprüft)
+  - kaputte/fehlende stats.json crasht nicht (Neustart bei Null)
+  - /stats/reset setzt alles auf Null
+
+Die Tests setzen die Statistik am Anfang und am Ende zurück.
+
+Aufruf:  python tests/test_blockC_stats.py
+"""
+
+import json
+import os
+import sys
+import traceback
+
+import requests
+
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
+BASE = "http://localhost:8770"
+STATS_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "stats.json")
+
+
+def reset():
+    r = requests.post(BASE + "/stats/reset", timeout=10)
+    assert r.status_code == 200 and r.json()["ok"]
+
+
+def get_stats():
+    r = requests.get(BASE + "/stats", timeout=10)
+    assert r.status_code == 200
+    return r.json()
+
+
+def count_file(saved, fmt):
+    return requests.post(BASE + "/stats/count_file", timeout=10,
+                         json={"saved_tokens": saved, "format": fmt})
+
+
+def count_prompt(score, ampel):
+    return requests.post(BASE + "/stats/count_prompt", timeout=10,
+                         json={"score": score, "ampel": ampel})
+
+
+def assert_numbers_only(obj, path="stats"):
+    """Harte Datenschutz-Regel: rekursiv nur Zahlen (keine Strings/Inhalte)."""
+    if isinstance(obj, dict):
+        for key, val in obj.items():
+            assert isinstance(key, str), f"{path}: Schlüssel {key!r} kein String"
+            assert_numbers_only(val, f"{path}.{key}")
+    else:
+        assert isinstance(obj, int) and not isinstance(obj, bool), \
+            f"{path}: Wert {obj!r} ist keine ganze Zahl - VERBOTEN (nur Zahlen!)"
+
+
+def test_default_structure():
+    reset()
+    s = get_stats()
+    assert s == {
+        "files_converted": 0,
+        "prompts_analyzed": 0,
+        "tokens_saved_total": 0,
+        "score_buckets": {"red": 0, "yellow": 0, "green": 0},
+        "best_score": 0,
+        "format_counts": {"pdf": 0, "docx": 0, "xlsx": 0, "csv": 0,
+                          "txt": 0, "pptx": 0},
+    }, f"Null-Struktur weicht ab: {s}"
+
+
+def test_count_file():
+    reset()
+    assert count_file(120, "pdf").json()["ok"]
+    assert count_file(80, "docx").json()["ok"]
+    s = get_stats()
+    assert s["files_converted"] == 2
+    assert s["tokens_saved_total"] == 200
+    assert s["format_counts"]["pdf"] == 1 and s["format_counts"]["docx"] == 1
+
+
+def test_count_file_clamps_negative():
+    reset()
+    assert count_file(-500, "txt").json()["ok"]
+    s = get_stats()
+    assert s["files_converted"] == 1, "Datei muss trotzdem zählen"
+    assert s["tokens_saved_total"] == 0, "Negative Ersparnis muss auf 0 geklemmt werden"
+
+
+def test_format_mapping():
+    reset()
+    count_file(10, "xlsm")
+    count_file(10, "md")
+    count_file(10, "exotisch")
+    s = get_stats()
+    assert s["format_counts"]["xlsx"] == 1, "xlsm nicht auf xlsx gemappt"
+    assert s["format_counts"]["txt"] == 1, "md nicht auf txt gemappt"
+    assert s["files_converted"] == 3, "Unbekanntes Format: Datei zählt, Format nicht"
+    assert sum(s["format_counts"].values()) == 2
+
+
+def test_count_prompt_and_best_score():
+    reset()
+    assert count_prompt(29, "rot").json()["ok"]
+    assert count_prompt(90, "gruen").json()["ok"]
+    assert count_prompt(48, "gelb").json()["ok"]
+    s = get_stats()
+    assert s["prompts_analyzed"] == 3
+    assert s["score_buckets"] == {"red": 1, "yellow": 1, "green": 1}
+    assert s["best_score"] == 90, "best_score muss das Maximum halten"
+
+
+def test_invalid_ampel_rejected():
+    reset()
+    r = count_prompt(50, "lila")
+    assert r.status_code == 400 and not r.json()["ok"]
+    assert get_stats()["prompts_analyzed"] == 0, "Ungültiges Event darf nicht zählen"
+
+
+def test_stats_file_numbers_only():
+    reset()
+    count_file(120, "pdf")
+    count_prompt(90, "gruen")
+    with open(STATS_PATH, "r", encoding="utf-8") as f:
+        on_disk = json.load(f)
+    assert_numbers_only(on_disk)
+    # Und explizit: exakt die erlaubte Schlüssel-Struktur, nichts darüber hinaus
+    assert set(on_disk.keys()) == {"files_converted", "prompts_analyzed",
+                                   "tokens_saved_total", "score_buckets",
+                                   "best_score", "format_counts"}
+    assert set(on_disk["score_buckets"].keys()) == {"red", "yellow", "green"}
+    assert set(on_disk["format_counts"].keys()) == {"pdf", "docx", "xlsx",
+                                                    "csv", "txt", "pptx"}
+
+
+def test_corrupt_stats_file_survives():
+    reset()
+    with open(STATS_PATH, "w", encoding="utf-8") as f:
+        f.write("kaputt{{{nicht-json")
+    s = get_stats()
+    assert s["files_converted"] == 0, "Kaputte Datei muss zu Null-Werten führen"
+    # Zählen repariert die Datei
+    assert count_file(50, "csv").json()["ok"]
+    s = get_stats()
+    assert s["files_converted"] == 1 and s["tokens_saved_total"] == 50
+
+
+def test_foreign_keys_are_dropped():
+    """Fremde/injizierte Schlüssel in stats.json werden beim Laden verworfen."""
+    reset()
+    with open(STATS_PATH, "w", encoding="utf-8") as f:
+        json.dump({"files_converted": 5, "geheimer_text": "darf nicht bleiben",
+                   "best_score": 999}, f)
+    s = get_stats()
+    assert "geheimer_text" not in s, "Fremder Schlüssel überlebt das Laden"
+    assert s["files_converted"] == 5
+    assert s["best_score"] == 100, "best_score muss auf 0..100 geklemmt werden"
+
+
+def test_reset():
+    reset()
+    count_file(100, "pdf")
+    count_prompt(90, "gruen")
+    reset()
+    s = get_stats()
+    assert s["files_converted"] == 0 and s["prompts_analyzed"] == 0
+    assert s["tokens_saved_total"] == 0 and s["best_score"] == 0
+    assert sum(s["score_buckets"].values()) == 0
+    assert sum(s["format_counts"].values()) == 0
+
+
+ALL_TESTS = [
+    test_default_structure,
+    test_count_file,
+    test_count_file_clamps_negative,
+    test_format_mapping,
+    test_count_prompt_and_best_score,
+    test_invalid_ampel_rejected,
+    test_stats_file_numbers_only,
+    test_corrupt_stats_file_survives,
+    test_foreign_keys_are_dropped,
+    test_reset,
+]
+
+if __name__ == "__main__":
+    passed, failed = 0, 0
+    for test in ALL_TESTS:
+        try:
+            test()
+            print(f"  PASS  {test.__name__}")
+            passed += 1
+        except Exception:
+            print(f"  FAIL  {test.__name__}")
+            traceback.print_exc()
+            failed += 1
+    reset()  # Entwickler-Statistik sauber bei Null hinterlassen
+    print(f"\n{passed} bestanden, {failed} fehlgeschlagen.")
+    sys.exit(1 if failed else 0)

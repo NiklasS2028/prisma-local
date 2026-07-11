@@ -577,6 +577,55 @@
   .ex-row.good { background: var(--ok-dk); color: var(--ex-good-ink); border: 1px solid rgba(var(--ok-rgb),.25); }
   .ex-tag { font-weight: 700; flex-shrink: 0; }
 
+  /* ================= TAB 3: STATISTIK ================= */
+  .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+  .stat-grid .card { margin-bottom: 0; }
+  .stat-card { text-align: center; padding: 26px 18px; }
+  .stat-big {
+    font-family: var(--mono);
+    font-size: 44px; font-weight: 700;
+    letter-spacing: -1.5px; line-height: 1.1;
+  }
+  .stat-big.gold { color: var(--neo-a); }
+  html[data-theme="light"] .stat-big.gold { color: var(--gold-ink); }
+  .stat-cap {
+    font-family: var(--mono); font-size: 11px; color: var(--ink-dim);
+    text-transform: uppercase; letter-spacing: .8px; margin-top: 6px;
+  }
+  .stat-sub { font-size: 12.5px; color: var(--ink-dim); margin-top: 8px; }
+  .stat-head { font-family: var(--disp); font-size: 14.5px; font-weight: 600; margin-bottom: 12px; }
+  .tokens-card { text-align: center; padding: 30px 24px; }
+
+  .donut-wrap { position: relative; width: 150px; height: 150px; margin: 4px auto 10px; }
+  .donut-wrap svg { transform: rotate(-90deg); }
+  .donut-track { fill: none; stroke: var(--panel-2); stroke-width: 14; }
+  html[data-theme="light"] .donut-track { stroke: rgba(201,162,39,.15); }
+  .donut-seg {
+    fill: none; stroke-width: 14;
+    transition: stroke-dasharray .8s cubic-bezier(.3,.7,.2,1), stroke-dashoffset .8s cubic-bezier(.3,.7,.2,1);
+  }
+  #segRed    { stroke: var(--danger); }
+  #segYellow { stroke: var(--warn); }
+  #segGreen  { stroke: var(--ok); }
+  .donut-center {
+    position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .donut-total { font-family: var(--mono); font-size: 30px; font-weight: 700; }
+  .bucket-line { font-family: var(--mono); font-size: 12px; text-align: center; color: var(--ink-dim); margin-top: 4px; }
+  .bucket-line b.r { color: var(--danger); }
+  .bucket-line b.y { color: var(--warn); }
+  .bucket-line b.g { color: var(--ok); }
+
+  .fmt-row {
+    display: flex; align-items: center; gap: 10px;
+    margin-bottom: 8px; font-family: var(--mono); font-size: 12px;
+  }
+  .fmt-name { width: 92px; color: var(--ink-dim); }
+  .fmt-bar-track { flex: 1; height: 8px; background: var(--panel-2); border-radius: 4px; overflow: hidden; }
+  .fmt-bar { height: 100%; background: var(--grad); border-radius: 4px; transition: width .8s ease; }
+  .fmt-count { width: 34px; text-align: right; }
+
   .tpl-head { margin: 20px 0 8px; }
   .tpl-head span {
     font-family: var(--mono);
@@ -657,6 +706,7 @@
     body { padding: 26px 14px 44px; }
     h1 { font-size: 25px; }
     html[data-theme="light"] h1 { font-size: 29px; }
+    .stat-grid { grid-template-columns: 1fr; }
     .savings-pct { font-size: 44px; }
     .ring-wrap { width: 136px; height: 136px; }
     .ring-wrap svg { width: 136px; height: 136px; }
@@ -691,6 +741,7 @@
   <div class="tabs">
     <button class="tab active" data-tab="konverter" id="tabConv">Datei-Konverter</button>
     <button class="tab" data-tab="trainer" id="tabTrainer">Prompt-Trainer</button>
+    <button class="tab" data-tab="stats" id="tabStats">Statistik</button>
   </div>
 
   <!-- ============ TAB 1: KONVERTER ============ -->
@@ -820,6 +871,62 @@
     </div>
   </div>
 
+  <!-- ============ TAB 3: STATISTIK ============ -->
+  <div class="panel" id="panel-stats">
+
+    <div class="stat-grid">
+      <div class="card stat-card">
+        <div class="stat-big" id="statFiles">0</div>
+        <div class="stat-cap" id="statFilesCap">Dateien bearbeitet</div>
+      </div>
+      <div class="card stat-card">
+        <div class="stat-big" id="statPrompts">0</div>
+        <div class="stat-cap" id="statPromptsCap">Prompts analysiert</div>
+      </div>
+    </div>
+
+    <div class="card tokens-card">
+      <div class="stat-big gold" id="statTokens">0</div>
+      <div class="stat-cap" id="statTokensCap">Tokens gespart (gesamt)</div>
+      <div class="stat-sub" id="statPages"></div>
+      <div class="stat-sub" id="statCost"></div>
+    </div>
+
+    <div class="stat-grid">
+      <div class="card stat-card">
+        <div class="stat-head" id="donutTitle">Verteilung deiner bisherigen Prompt-Scores</div>
+        <div class="donut-wrap">
+          <svg width="150" height="150" viewBox="0 0 150 150">
+            <circle class="donut-track" cx="75" cy="75" r="60"></circle>
+            <circle class="donut-seg" id="segRed" cx="75" cy="75" r="60"></circle>
+            <circle class="donut-seg" id="segYellow" cx="75" cy="75" r="60"></circle>
+            <circle class="donut-seg" id="segGreen" cx="75" cy="75" r="60"></circle>
+          </svg>
+          <div class="donut-center"><div class="donut-total" id="donutTotal">0</div></div>
+        </div>
+        <div class="bucket-line" id="bucketLine"></div>
+      </div>
+      <div class="card stat-card">
+        <div class="stat-head" id="bestTitle">Bester Score</div>
+        <div class="stat-big" id="statBest">–</div>
+        <div class="stat-sub" id="bestSub">dein bisher stärkster Prompt (von 100)</div>
+        <div class="stat-head" id="msTitle" style="margin-top:22px;">Meilensteine</div>
+        <div class="stat-sub" id="msList"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="stat-head" id="fmtTitle">Konverter-Nutzung nach Format</div>
+      <div id="formatBars"></div>
+    </div>
+
+    <div class="note" id="statsPrivacy"></div>
+
+    <div class="actions">
+      <button class="ghost" id="statsResetBtn">Statistik zurücksetzen</button>
+    </div>
+  </div>
+
   <footer id="footerText">
   </footer>
 
@@ -872,7 +979,7 @@
   const I18N = {
     de: {
       brand: "prisma · lokal",
-      tabs: { konverter: "Datei-Konverter", trainer: "Prompt-Trainer" },
+      tabs: { konverter: "Datei-Konverter", trainer: "Prompt-Trainer", stats: "Statistik" },
       titles: {
         konverter: {
           h1: "Datei rein, effizientes Format raus.",
@@ -881,6 +988,10 @@
         trainer: {
           h1: "Lerne, bessere Prompts zu schreiben.",
           sub: 'Füge deinen Prompt ein und bekomme eine ehrliche Struktur-Bewertung mit Beispielen — plus eine Vorlage im richtigen Format für dein KI-Modell.'
+        },
+        stats: {
+          h1: "Deine Arbeit in Zahlen.",
+          sub: 'Was Prisma bisher für dich erledigt hat. Gespeichert werden ausschließlich Zahlen — keine Inhalte, keine Dateinamen.'
         }
       },
       dropMain: "Datei hierher ziehen oder klicken",
@@ -930,11 +1041,33 @@
       tplHint: 'Die <b>[Fragen in Klammern]</b> beantwortest du selbst und ersetzt sie durch deine Angaben — genau dabei lernst du, was einen guten Prompt ausmacht.',
       tplCopyBtn: "Vorlage kopieren",
       reanalyzeBtn: "In Eingabe übernehmen",
-      footer: 'Läuft komplett auf deinem Rechner unter <code>localhost:8770</code>. Keine Datei und kein Prompt verlässt deinen PC.'
+      footer: 'Läuft komplett auf deinem Rechner unter <code>localhost:8770</code>. Keine Datei und kein Prompt verlässt deinen PC.',
+      // --- Statistik-Tab ---
+      statFilesCap: "Dateien bearbeitet",
+      statPromptsCap: "Prompts analysiert",
+      statTokensCap: "Tokens gespart (gesamt)",
+      statPages: n => `≈ ${n} Seiten Text (geschätzt, ~500 Tokens/Seite)`,
+      statCost: c => `≈ ${c} US$ gesparte API-Kosten (grobe Schätzung, ~3 US$ je 1 Mio. Eingabe-Tokens)`,
+      donutTitle: "Verteilung deiner bisherigen Prompt-Scores",
+      donutEmpty: "Noch keine Prompts analysiert.",
+      bucketLine: (r, y, g) => `<b class="r">${r} rot</b> · <b class="y">${y} gelb</b> · <b class="g">${g} grün</b>`,
+      bestTitle: "Bester Score",
+      bestSub: "dein bisher stärkster Prompt (von 100)",
+      msTitle: "Meilensteine",
+      msFiles: "Dateien",
+      msPrompts: "Prompts",
+      msReached: n => `✓ ${n} erreicht`,
+      msNext: n => `nächstes Ziel: ${n}`,
+      msAll: "alle Meilensteine erreicht",
+      fmtTitle: "Konverter-Nutzung nach Format",
+      fmtNames: { pdf: "PDF", docx: "Word", xlsx: "Excel", csv: "CSV", txt: "Text", pptx: "PowerPoint" },
+      statsPrivacy: "Deine Statistik wird nur lokal auf deinem Rechner gespeichert — ausschließlich Zahlen, keine Inhalte, keine Dateinamen. Sie verlässt deinen PC nie.",
+      statsResetBtn: "Statistik zurücksetzen",
+      statsResetConfirm: "Wirklich? Erneut klicken zum Bestätigen",
     },
     en: {
       brand: "prisma · local",
-      tabs: { konverter: "File Converter", trainer: "Prompt Trainer" },
+      tabs: { konverter: "File Converter", trainer: "Prompt Trainer", stats: "Stats" },
       titles: {
         konverter: {
           h1: "File in, efficient format out.",
@@ -943,6 +1076,10 @@
         trainer: {
           h1: "Learn to write better prompts.",
           sub: 'Paste your prompt and get an honest structure review with examples — plus a template in the right format for your AI model.'
+        },
+        stats: {
+          h1: "Your work in numbers.",
+          sub: 'What Prisma has done for you so far. Only numbers are stored — no content, no file names.'
         }
       },
       dropMain: "Drag a file here or click",
@@ -991,7 +1128,29 @@
       tplHint: 'You answer the <b>[questions in brackets]</b> yourself and replace them with your details — that\'s exactly how you learn what makes a good prompt.',
       tplCopyBtn: "Copy template",
       reanalyzeBtn: "Use as input",
-      footer: 'Runs entirely on your machine at <code>localhost:8770</code>. No file and no prompt ever leaves your PC.'
+      footer: 'Runs entirely on your machine at <code>localhost:8770</code>. No file and no prompt ever leaves your PC.',
+      // --- Stats tab ---
+      statFilesCap: "files processed",
+      statPromptsCap: "prompts analyzed",
+      statTokensCap: "tokens saved (total)",
+      statPages: n => `≈ ${n} pages of text (estimated, ~500 tokens/page)`,
+      statCost: c => `≈ $${c} in saved API costs (rough estimate, ~$3 per 1M input tokens)`,
+      donutTitle: "Distribution of your prompt scores so far",
+      donutEmpty: "No prompts analyzed yet.",
+      bucketLine: (r, y, g) => `<b class="r">${r} red</b> · <b class="y">${y} yellow</b> · <b class="g">${g} green</b>`,
+      bestTitle: "Best score",
+      bestSub: "your strongest prompt so far (out of 100)",
+      msTitle: "Milestones",
+      msFiles: "files",
+      msPrompts: "prompts",
+      msReached: n => `✓ ${n} reached`,
+      msNext: n => `next goal: ${n}`,
+      msAll: "all milestones reached",
+      fmtTitle: "Converter usage by format",
+      fmtNames: { pdf: "PDF", docx: "Word", xlsx: "Excel", csv: "CSV", txt: "Text", pptx: "PowerPoint" },
+      statsPrivacy: "Your statistics are stored locally on your machine only — nothing but numbers, no content, no file names. They never leave your PC.",
+      statsResetBtn: "Reset statistics",
+      statsResetConfirm: "Sure? Click again to confirm",
     }
   };
 
@@ -1023,6 +1182,7 @@
     setText('brandName', t.brand);
     setText('tabConv', t.tabs.konverter);
     setText('tabTrainer', t.tabs.trainer);
+    setText('tabStats', t.tabs.stats);
     // Titel je nach aktivem Tab
     const activeTab = document.querySelector('.tab.active').dataset.tab;
     setText('pageTitle', t.titles[activeTab].h1);
@@ -1052,6 +1212,19 @@
     setText('tplCopyBtn', t.tplCopyBtn);
     setText('reanalyzeBtn', t.reanalyzeBtn);
     setHtml('footerText', t.footer);
+    // Statistik-Tab
+    setText('statFilesCap', t.statFilesCap);
+    setText('statPromptsCap', t.statPromptsCap);
+    setText('statTokensCap', t.statTokensCap);
+    setText('donutTitle', t.donutTitle);
+    setText('bestTitle', t.bestTitle);
+    setText('bestSub', t.bestSub);
+    setText('msTitle', t.msTitle);
+    setText('fmtTitle', t.fmtTitle);
+    setText('statsPrivacy', t.statsPrivacy);
+    resetArmed = false;
+    setText('statsResetBtn', t.statsResetBtn);
+    if (lastStats) renderStats(lastStats);  // dynamische Texte neu aufbauen
     // Modell-Buttons: 'ohne'/'Anderes' sind sprachabhängig
     document.querySelector('#convModels [data-m="none"]').textContent = t.modelBtnNone;
     document.querySelector('#ptModels [data-m="universal"]').textContent = t.modelBtnUniversal;
@@ -1094,6 +1267,7 @@
       document.getElementById('panel-' + tab.dataset.tab).classList.add('active');
       setText('pageTitle', T().titles[tab.dataset.tab].h1);
       setHtml('pageSub', T().titles[tab.dataset.tab].sub);
+      if (tab.dataset.tab === 'stats') refreshStats();  // immer frische Zahlen
     });
   });
 
@@ -1125,6 +1299,11 @@
   const convResult = document.getElementById('convResult');
   let lastFullText = "";
   let lastDownload = null;
+  // Statistik: pro Konvertierungs-Ergebnis genau EIN Zähl-Event,
+  // und erst wenn der Nutzer das Ergebnis wirklich nutzt (Download/Kopie).
+  let convCounted = true;        // nichts zu zählen, bis ein Ergebnis da ist
+  let convStatsPayload = null;   // enthält NUR Zahlen + Format-Kategorie
+  let lastFileExt = "";
 
   drop.addEventListener('click', () => fileInput.click());
   ['dragenter','dragover'].forEach(ev =>
@@ -1142,6 +1321,7 @@
 
   async function handleFile(file) {
     const isPdf = file.name.toLowerCase().endsWith('.pdf');
+    lastFileExt = (file.name.split('.').pop() || '').toLowerCase();
     showStatus(convStatus, 'loading', T().converting(file.name, isPdf));
     convResult.classList.remove('show');
 
@@ -1201,18 +1381,29 @@
 
     lastFullText = d.output_text;
     lastDownload = { id: d.download_id, name: d.download_name };
+
+    // Neues Ergebnis -> Zähl-Event wieder freigeben (Payload: nur Zahlen
+    // + Format-Kategorie, niemals der Dateiname oder Inhalt)
+    convCounted = false;
+    convStatsPayload = {
+      saved_tokens: Math.max(0, (d.tokens_before || 0) - (d.tokens_after || 0)),
+      format: { xlsm: 'xlsx', md: 'txt' }[lastFileExt] || lastFileExt
+    };
+
     convResult.classList.add('show');
     convResult.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }
 
   document.getElementById('downloadBtn').addEventListener('click', () => {
     if (!lastDownload) return;
+    countFileOnce();
     window.location.href = `/download/${lastDownload.id}?name=${encodeURIComponent(lastDownload.name)}`;
   });
   document.getElementById('copyBtn').addEventListener('click', async () => {
     if (!lastFullText) return;
     try {
       await navigator.clipboard.writeText(lastFullText);
+      countFileOnce();
       flashBtn('copyBtn', T().copied);
     } catch (e) { showStatus(convStatus, 'error', T().copyFail); }
   });
@@ -1272,6 +1463,7 @@
       });
       const data = await res.json();
       if (!data.ok) { showStatus(ptStatus, 'error', '⚠ ' + (data.error || T().analyzeError)); return; }
+      countPromptOnce(prompt, data);
       renderPtResult(data);
     } catch (err) {
       showStatus(ptStatus, 'error', T().connError);
@@ -1355,6 +1547,127 @@
 
   function escapeHtml(s) {
     return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+
+  // ================= TAB 3: STATISTIK =================
+  // Die Statistik speichert serverseitig NUR ZAHLEN (stats.json).
+  // Der Client schickt Zähl-Events genau einmal:
+  //   - Datei: erst wenn das Ergebnis wirklich genutzt wird (Download/Kopie),
+  //     pro Konvertierungs-Ergebnis einmal.
+  //   - Prompt: pro Prompt-INHALT einmal (Re-Analyse desselben Texts zählt nicht).
+
+  let lastStats = null;
+  const DONUT_LEN = 2 * Math.PI * 60;   // Umfang des Donut-Rings (r=60)
+  const MILESTONES = [1, 10, 50, 100, 250, 500, 1000];
+
+  async function refreshStats() {
+    try {
+      const res = await fetch('/stats');
+      lastStats = await res.json();
+      renderStats(lastStats);
+    } catch (e) { /* Server weg - alte Anzeige stehen lassen */ }
+  }
+
+  function renderDonut(r, y, g) {
+    const total = r + y + g;
+    let offset = 0;
+    [['segRed', r], ['segYellow', y], ['segGreen', g]].forEach(([id, val]) => {
+      const el = document.getElementById(id);
+      const len = total ? (val / total) * DONUT_LEN : 0;
+      el.style.strokeDasharray = `${len} ${DONUT_LEN - len}`;
+      el.style.strokeDashoffset = -offset;
+      offset += len;
+    });
+    document.getElementById('donutTotal').textContent = total.toLocaleString(LOCALE());
+  }
+
+  function msLine(label, count) {
+    const t = T();
+    const reached = MILESTONES.filter(m => count >= m).pop();
+    const next = MILESTONES.find(m => count < m);
+    if (!reached) return `${label}: ${t.msNext(next)}`;
+    return `${label}: ${t.msReached(reached)}` +
+           (next ? ` · ${t.msNext(next)}` : ` · ${t.msAll}`);
+  }
+
+  function renderStats(s) {
+    const t = T();
+    countUp(document.getElementById('statFiles'), s.files_converted);
+    countUp(document.getElementById('statPrompts'), s.prompts_analyzed);
+    countUp(document.getElementById('statTokens'), s.tokens_saved_total, 1000);
+    const pages = Math.round(s.tokens_saved_total / 500);
+    document.getElementById('statPages').textContent = t.statPages(pages.toLocaleString(LOCALE()));
+    const cost = (s.tokens_saved_total / 1e6 * 3).toLocaleString(
+      LOCALE(), { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    document.getElementById('statCost').textContent = t.statCost(cost);
+    const b = s.score_buckets;
+    renderDonut(b.red, b.yellow, b.green);
+    const line = document.getElementById('bucketLine');
+    if (b.red + b.yellow + b.green > 0) {
+      line.innerHTML = t.bucketLine(b.red, b.yellow, b.green);
+    } else {
+      line.textContent = t.donutEmpty;
+    }
+    document.getElementById('statBest').textContent =
+      s.prompts_analyzed > 0 ? s.best_score : '–';
+    document.getElementById('msList').innerHTML =
+      msLine(t.msFiles, s.files_converted) + '<br>' + msLine(t.msPrompts, s.prompts_analyzed);
+    const maxCount = Math.max(1, ...Object.values(s.format_counts));
+    document.getElementById('formatBars').innerHTML =
+      Object.entries(s.format_counts).map(([key, val]) => `
+        <div class="fmt-row">
+          <span class="fmt-name">${t.fmtNames[key] || key}</span>
+          <div class="fmt-bar-track"><div class="fmt-bar" style="width:${val / maxCount * 100}%"></div></div>
+          <span class="fmt-count">${val}</span>
+        </div>`).join('');
+  }
+
+  // Reset mit Sicherheitsabfrage: erster Klick "scharf schalten",
+  // zweiter Klick (innerhalb 4s) setzt wirklich zurück.
+  let resetArmed = false;
+  let resetTimer = null;
+  document.getElementById('statsResetBtn').addEventListener('click', async () => {
+    const btn = document.getElementById('statsResetBtn');
+    if (!resetArmed) {
+      resetArmed = true;
+      btn.textContent = T().statsResetConfirm;
+      resetTimer = setTimeout(() => {
+        resetArmed = false;
+        btn.textContent = T().statsResetBtn;
+      }, 4000);
+      return;
+    }
+    clearTimeout(resetTimer);
+    resetArmed = false;
+    btn.textContent = T().statsResetBtn;
+    try {
+      await fetch('/stats/reset', { method: 'POST' });
+    } catch (e) { /* Server weg */ }
+    refreshStats();
+  });
+
+  // --- Zähl-Event Konverter (einmal pro Ergebnis, erst bei echter Nutzung) ---
+  function countFileOnce() {
+    if (convCounted || !convStatsPayload) return;
+    convCounted = true;
+    fetch('/stats/count_file', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(convStatsPayload)
+    }).catch(() => {});
+  }
+
+  // --- Zähl-Event Trainer (einmal pro Prompt-Inhalt) ---
+  let lastCountedPrompt = null;
+  function countPromptOnce(promptText, data) {
+    const normalized = promptText.trim();
+    if (normalized === lastCountedPrompt) return;
+    lastCountedPrompt = normalized;
+    fetch('/stats/count_prompt', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ score: data.score, ampel: data.ampel })
+    }).catch(() => {});
   }
 
   // Initiale Sprache + Theme anwenden (gespeicherte Wahl oder Default)
