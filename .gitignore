@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# Laufzeit-Ordner (werden von app.py automatisch angelegt)
+uploads/
+outputs/
+
+# Betriebssystem
+Thumbs.db
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
