@@ -218,6 +218,44 @@ def _check_contrasts(page, theme):
     assert not problems, "Kontrast-Probleme:\n" + "\n".join(problems)
 
 
+def test_gold_focus_light(page):
+    """Feinschliff: Gold nur an führenden Stellen. Dekorative Linien,
+    Footer-Code und der Logo-Doppelstrich sind im hellen Theme neutral."""
+    set_theme(page, "light")
+    neutral_line = (230, 232, 236)  # --line
+    dim = (97, 101, 111)            # --ink-dim
+    # Footer-Haarlinie und Tab-Leiste: neutral, nicht golden
+    assert _parse_rgb(style(page, "footer", "border-top-color")) == neutral_line, \
+        "Footer-Linie ist nicht neutral"
+    assert _parse_rgb(style(page, ".tabs", "border-bottom-color")) == neutral_line, \
+        "Tab-Leisten-Linie ist nicht neutral"
+    # Footer-Code und '//' gedämpft
+    assert _parse_rgb(style(page, "footer code", "color")) == dim, \
+        "Footer-Code glänzt noch golden"
+    assert _parse_rgb(style(page, ".brand-pre", "color")) == dim, \
+        "Logo-Doppelstrich glänzt noch golden"
+    # Kontrast der neuen Grau-Töne bleibt lesbar
+    ratio = contrast(style(page, "footer code", "color"),
+                     style(page, "body", "background-color"))
+    assert ratio >= 4.5, f"Footer-Code-Kontrast zu niedrig: {ratio:.2f}"
+    # Headline bleibt der goldene Hauptauftritt
+    assert _parse_rgb(style(page, "#pageTitle", "color")) == (168, 134, 29)
+    # Dunkles Theme: Doppelstrich bleibt Teil des Verlaufs (transparent geclippt)
+    set_theme(page, "dark")
+    assert "0, 0, 0, 0" in style(page, ".brand-pre", "color").replace("rgba(", ""), \
+        "Dunkles Theme: '//' nicht mehr im Verlaufs-Clip"
+
+
+def test_calm_placeholder(page):
+    """Platzhalter ruhiger und sprachabhängig."""
+    page.click("#tabTrainer")
+    ph = page.locator("#promptInput").get_attribute("placeholder")
+    assert "Photosynthese" in ph and "hunde" not in ph.lower(), f"DE-Platzhalter: {ph}"
+    page.click('#langToggle .lang-btn[data-lang="en"]')
+    ph = page.locator("#promptInput").get_attribute("placeholder")
+    assert "photosynthesis" in ph, f"EN-Platzhalter: {ph}"
+
+
 def test_contrast_light(page):
     _check_contrasts(page, "light")
 
@@ -246,6 +284,8 @@ ALL_TESTS = [
     test_dark_theme_unchanged,
     test_light_serif_heading,
     test_light_no_grid_pattern,
+    test_gold_focus_light,
+    test_calm_placeholder,
     test_contrast_light,
     test_contrast_dark,
     test_screenshots_both_themes,

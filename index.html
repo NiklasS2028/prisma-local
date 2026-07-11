@@ -154,10 +154,14 @@
     font-size: 12.5px; font-weight: 700;
     letter-spacing: 1.2px;
     text-transform: uppercase;
+    display: inline-block;
+  }
+  /* Verlaufs-Text pro Span, damit der '//'-Strich im hellen Theme
+     separat neutralisiert werden kann (dunkel: beide im Verlauf) */
+  .brand-pre, .brand-name {
     background: var(--grad-brand);
     -webkit-background-clip: text; background-clip: text;
     color: transparent;
-    display: inline-block;
   }
 
   /* --- Sprach-Toggle DE/EN --- */
@@ -609,14 +613,17 @@
     font-weight: 600;
     letter-spacing: 0;
   }
-  /* Goldene Haarlinien gliedern die Bereiche */
-  html[data-theme="light"] .tabs { border-bottom-color: rgba(201,162,39,.35); }
+  /* Gold nur, wo es den Blick FÜHRT: aktive Tab-Linie ja, dekorative
+     Trennlinien (Tab-Leiste, Footer) bleiben neutral, damit die goldene
+     Headline thront statt sich zu verteilen. */
   html[data-theme="light"] .tab.active::after {
     background: linear-gradient(90deg, #c9a227, #a8861d);
   }
-  html[data-theme="light"] footer { border-top-color: rgba(201,162,39,.35); }
   /* Score-Ring: goldene Laufbahn (die Füllung behält die Ampel-Semantik) */
   html[data-theme="light"] .ring-bg { stroke: rgba(201,162,39,.18); }
+  /* Footer-Code und Logo-Doppelstrich: gedämpft statt glänzend */
+  html[data-theme="light"] footer code { color: var(--ink-dim); }
+  html[data-theme="light"] .brand-pre { background: none; color: var(--ink-dim); }
   html[data-theme="light"] button.primary {
     box-shadow: 0 3px 12px rgba(30,58,95,.22), 0 1px 0 rgba(255,255,255,.12) inset;
   }
@@ -664,7 +671,7 @@
 
   <header>
     <div class="header-top">
-      <div class="brand" id="brand">// prisma · lokal</div>
+      <div class="brand" id="brand"><span class="brand-pre">//</span> <span class="brand-name" id="brandName">prisma · lokal</span></div>
       <div style="display:flex; gap:10px;">
         <div class="lang-toggle" id="themeToggle" role="group" aria-label="Design / Theme">
           <button class="lang-btn" data-theme="light" aria-label="Helles Design / Light theme" title="Hell / Light">☀</button>
@@ -864,7 +871,7 @@
   // Alle UI-Texte zweisprachig. applyLang() schreibt sie in die Elemente.
   const I18N = {
     de: {
-      brand: "// prisma · lokal",
+      brand: "prisma · lokal",
       tabs: { konverter: "Datei-Konverter", trainer: "Prompt-Trainer" },
       titles: {
         konverter: {
@@ -910,7 +917,7 @@
       copied: "✓ Kopiert",
       copyFail: "Kopieren nicht möglich (Browser-Berechtigung).",
       ptInfo: '<b style="color:var(--ink);">Was dieses Werkzeug macht (und was nicht):</b> Es prüft die <b style="color:var(--ink);">Struktur</b> deines Prompts mit klaren Regeln und zeigt dir mit Beispielen, was fehlt — damit du selbst besser wirst. Es nutzt keine KI, erfindet nichts dazu und dein Prompt bleibt auf deinem Rechner.',
-      ptPlaceholder: "Füge hier deinen Prompt ein…\n\nz.B.: schreib mal was über hunde",
+      ptPlaceholder: "Füge hier deinen Prompt ein …\n\nz.B. Erkläre Photosynthese in einfachen Worten",
       demoLabel: "Beispiel laden:",
       demoBtns: { weak: "schwach", medium: "mittel", strong: "stark" },
       analyzeBtn: "Prompt analysieren",
@@ -926,7 +933,7 @@
       footer: 'Läuft komplett auf deinem Rechner unter <code>localhost:8770</code>. Keine Datei und kein Prompt verlässt deinen PC.'
     },
     en: {
-      brand: "// prisma · local",
+      brand: "prisma · local",
       tabs: { konverter: "File Converter", trainer: "Prompt Trainer" },
       titles: {
         konverter: {
@@ -971,7 +978,7 @@
       copied: "✓ Copied",
       copyFail: "Copying not possible (browser permission).",
       ptInfo: '<b style="color:var(--ink);">What this tool does (and does not do):</b> It checks the <b style="color:var(--ink);">structure</b> of your prompt with clear rules and shows you with examples what\'s missing — so you get better yourself. It uses no AI, invents nothing, and your prompt stays on your machine.',
-      ptPlaceholder: "Paste your prompt here…\n\ne.g.: write something about dogs",
+      ptPlaceholder: "Paste your prompt here …\n\ne.g. Explain photosynthesis in simple terms",
       demoLabel: "Load example:",
       demoBtns: { weak: "weak", medium: "medium", strong: "strong" },
       analyzeBtn: "Analyze prompt",
@@ -1013,7 +1020,7 @@
   function applyLang() {
     const t = T();
     document.documentElement.lang = lang;
-    setText('brand', t.brand);
+    setText('brandName', t.brand);
     setText('tabConv', t.tabs.konverter);
     setText('tabTrainer', t.tabs.trainer);
     // Titel je nach aktivem Tab
