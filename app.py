@@ -126,6 +126,24 @@ def _save_stats(stats):
             pass
 
 
+# Origins, von denen zustandsaendernde POSTs akzeptiert werden (die eigene UI)
+_ALLOWED_ORIGINS = {"http://127.0.0.1:8770", "http://localhost:8770"}
+
+
+def _check_origin():
+    """
+    Wehrt Cross-Site-POSTs ab: Browser senden bei Cross-Site-Requests IMMER
+    einen Origin-Header - ist er vorhanden und fremd, antworten wir 403.
+    Fehlender Origin bleibt erlaubt (requests/curl/Tests senden keinen).
+    Gibt None zurueck, wenn der Request passieren darf, sonst die 403-Antwort.
+    """
+    origin = request.headers.get("Origin")
+    if origin and origin not in _ALLOWED_ORIGINS:
+        return jsonify({"ok": False,
+                        "error": "Anfrage von fremdem Origin abgelehnt."}), 403
+    return None
+
+
 @app.errorhandler(413)
 def too_large(_e):
     """
@@ -239,7 +257,11 @@ def stats_count_file():
     Zaehl-Event des Clients: Der Nutzer hat ein Konvertierungs-Ergebnis
     wirklich GENUTZT (Download oder Zwischenablage). Der Client schickt
     das Event pro Ergebnis nur einmal. Payload: nur Zahlen + Format-Kategorie.
+    Cross-Site-POSTs fremder Webseiten werden per Origin-Check abgewiesen.
     """
+    denied = _check_origin()
+    if denied:
+        return denied
     data = request.get_json(silent=True) or {}
     saved = _clean_int(data.get("saved_tokens"))
     fmt = str(data.get("format", "")).lower()
@@ -260,7 +282,11 @@ def stats_count_prompt():
     Zaehl-Event des Clients: eine Prompt-Analyse (pro Prompt-Inhalt nur
     einmal - die Dopplungs-Entscheidung trifft der Client).
     Payload: nur Score-Zahl + Ampel-Kategorie, NIE der Prompt selbst.
+    Cross-Site-POSTs fremder Webseiten werden per Origin-Check abgewiesen.
     """
+    denied = _check_origin()
+    if denied:
+        return denied
     data = request.get_json(silent=True) or {}
     score = _clean_int(data.get("score"), 0, 100)
     bucket = {"rot": "red", "gelb": "yellow", "gruen": "green"}.get(data.get("ampel"))
@@ -277,7 +303,12 @@ def stats_count_prompt():
 
 @app.route("/stats/reset", methods=["POST"])
 def stats_reset():
-    """Setzt die Statistik auf Null (Bestaetigung passiert im Client)."""
+    """Setzt die Statistik auf Null. Die zweistufige Bestaetigung passiert
+    im Client; serverseitig schuetzt der Origin-Check vor Cross-Site-POSTs
+    fremder Webseiten (mehr ist bei einem localhost-Tool nicht noetig)."""
+    denied = _check_origin()
+    if denied:
+        return denied
     with _STATS_LOCK:
         stats = _fresh_stats()
         _save_stats(stats)

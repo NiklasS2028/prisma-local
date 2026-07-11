@@ -167,6 +167,37 @@ def test_foreign_keys_are_dropped():
     assert s["best_score"] == 100, "best_score muss auf 0..100 geklemmt werden"
 
 
+def test_origin_check_reset():
+    """Block F.4: Reset mit fremdem Origin -> 403, erlaubt/ohne -> 200."""
+    reset()
+    count_file(10, "pdf")
+    r = requests.post(BASE + "/stats/reset", timeout=10,
+                      headers={"Origin": "http://boese-seite.example"})
+    assert r.status_code == 403 and not r.json()["ok"], \
+        f"Fremder Origin nicht abgewehrt: {r.status_code}"
+    assert get_stats()["files_converted"] == 1, "403 darf nicht resetten"
+    r = requests.post(BASE + "/stats/reset", timeout=10,
+                      headers={"Origin": "http://localhost:8770"})
+    assert r.status_code == 200, "Eigener Origin muss erlaubt sein"
+    r = requests.post(BASE + "/stats/reset", timeout=10)  # ohne Origin
+    assert r.status_code == 200, "Fehlender Origin (curl/Tests) muss erlaubt sein"
+
+
+def test_origin_check_count_endpoints():
+    """Block F.4: je ein 403-Fall fuer beide Zaehl-Endpunkte."""
+    reset()
+    evil = {"Origin": "https://angreifer.example"}
+    r = requests.post(BASE + "/stats/count_file", timeout=10,
+                      json={"saved_tokens": 9999, "format": "pdf"}, headers=evil)
+    assert r.status_code == 403, f"count_file: {r.status_code}"
+    r = requests.post(BASE + "/stats/count_prompt", timeout=10,
+                      json={"score": 1, "ampel": "rot"}, headers=evil)
+    assert r.status_code == 403, f"count_prompt: {r.status_code}"
+    s = get_stats()
+    assert s["files_converted"] == 0 and s["prompts_analyzed"] == 0, \
+        "Abgewehrte Events haben trotzdem gezählt"
+
+
 def test_atomic_save_survives_write_failure():
     """Block F.3: Schreibfehler mitten im json.dump darf die bestehende
     stats.json NIE zerstoeren (tmp + os.replace). Direkt-Import von app,
@@ -230,6 +261,8 @@ ALL_TESTS = [
     test_stats_file_numbers_only,
     test_corrupt_stats_file_survives,
     test_foreign_keys_are_dropped,
+    test_origin_check_reset,
+    test_origin_check_count_endpoints,
     test_atomic_save_survives_write_failure,
     test_atomic_save_leaves_no_tmp,
     test_reset,
