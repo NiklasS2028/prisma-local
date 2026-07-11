@@ -1,4 +1,4 @@
-# KI-Werkstatt - Laufzeit-Abhaengigkeiten
+# Prisma - Laufzeit-Abhaengigkeiten
 # Installation:  pip install -r requirements.txt
 
 flask           # lokaler Webserver (app.py)

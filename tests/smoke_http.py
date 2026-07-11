@@ -26,7 +26,7 @@ os.makedirs(FIXTURES, exist_ok=True)
 def test_index():
     r = requests.get(BASE + "/", timeout=10)
     assert r.status_code == 200, f"Status {r.status_code}"
-    assert "KI-Werkstatt" in r.text and 'id="langToggle"' in r.text, \
+    assert "Prisma" in r.text and 'id="langToggle"' in r.text, \
         "index.html unvollständig ausgeliefert"
 
 

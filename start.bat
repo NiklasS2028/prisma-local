@@ -1,6 +1,6 @@
 @echo off
 rem ============================================================
-rem  KI-Werkstatt - Start
+rem  Prisma - Start
 rem  Startet den lokalen Server und oeffnet den Browser.
 rem  Beenden: dieses Fenster schliessen oder Strg+C druecken.
 rem ============================================================
@@ -15,7 +15,7 @@ if errorlevel 1 (
 )
 
 echo.
-echo  KI-WERKSTATT startet ...
+echo  PRISMA startet ...
 echo  Browser oeffnet sich gleich auf http://localhost:8770
 echo  Beenden: dieses Fenster schliessen oder Strg+C
 echo.

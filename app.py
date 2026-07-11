@@ -1,7 +1,7 @@
 """
 app.py
 ------
-Lokaler Webserver fuer den Token-Konverter.
+Lokaler Webserver fuer Prisma (Datei-Konverter + Prompt-Trainer).
 
 Startet einen kleinen Flask-Server auf http://localhost:8770
 Die Weboberflaeche (index.html) laedt dort, du ziehst Dateien rein,
@@ -157,7 +157,7 @@ def download(out_id):
 if __name__ == "__main__":
     port = 8770
     print("=" * 60)
-    print("  TOKEN-KONVERTER laeuft!")
+    print("  PRISMA laeuft!")
     print(f"  Oeffne im Browser:  http://localhost:{port}")
     print(f"  Max. Dateigroesse:  {MAX_MB} MB")
     print("  Beenden mit:        Strg + C")

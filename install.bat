@@ -1,13 +1,13 @@
 @echo off
 rem ============================================================
-rem  KI-Werkstatt - einmalige Installation
+rem  Prisma - einmalige Installation
 rem  Installiert die Python-Pakete aus requirements.txt.
 rem ============================================================
 cd /d "%~dp0"
 
 echo.
-echo  KI-WERKSTATT - Installation
-echo  ===========================
+echo  PRISMA - Installation
+echo  =====================
 echo.
 
 where python >nul 2>nul

@@ -1,4 +1,4 @@
-# KI-Werkstatt
+# Prisma
 
 **Deutsch** | [English below](#english)
 
@@ -111,7 +111,7 @@ MIT — siehe [LICENSE](LICENSE).
 
 <a name="english"></a>
 
-# KI-Werkstatt (AI Workshop) — English
+# Prisma — English
 
 Two local AI helper tools in one browser UI — runs entirely on your
 machine (`localhost:8770`); no file and no prompt ever leaves your PC.

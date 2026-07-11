@@ -1,7 +1,7 @@
 """
 converter.py
 ------------
-Kern-Logik des Token-Konverters.
+Kern-Logik des Prisma-Datei-Konverters.
 
 Aufgabe: Nimmt eine Datei (PDF, DOCX, XLSX, CSV, TXT, PPTX) und wandelt sie
 in das token-effizienteste Format um:
