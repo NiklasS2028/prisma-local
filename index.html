@@ -111,6 +111,11 @@
 
   * { box-sizing: border-box; margin: 0; padding: 0; }
 
+  /* D1: Platz fuer die Scrollbar IMMER reservieren. Sonst springt die
+     zentrierte Spalte horizontal, wenn die Scrollbar beim Sprach-/Theme-
+     Wechsel oder laengerem Inhalt erscheint/verschwindet. */
+  html { scrollbar-gutter: stable; }
+
   body {
     background: var(--bg);
     color: var(--ink);
@@ -795,6 +800,7 @@
       <div class="actions">
         <button class="primary" id="downloadBtn">Datei herunterladen</button>
         <button class="ghost" id="copyBtn">In Zwischenablage</button>
+        <button class="ghost" id="convResetBtn">Neue Datei</button>
       </div>
     </div>
   </div>
@@ -1009,6 +1015,7 @@
       modelBtnNone: "ohne",
       modelBtnUniversal: "Anderes",
       converting: (name, isPdf) => `Konvertiere „${name}“${isPdf ? ' (falls Bild-PDF, läuft OCR — kann ein paar Minuten dauern)' : ''} …`,
+      convResetBtn: "Neue Datei",
       connError: "⚠ Verbindung zum Server fehlgeschlagen. Läuft app.py noch?",
       unknownError: "Unbekannter Fehler.",
       analyzeError: "Fehler bei der Analyse.",
@@ -1061,6 +1068,9 @@
       msAll: "alle Meilensteine erreicht",
       fmtTitle: "Konverter-Nutzung nach Format",
       fmtNames: { pdf: "PDF", docx: "Word", xlsx: "Excel", csv: "CSV", txt: "Text", pptx: "PowerPoint" },
+      fmtEmpty: "Noch keine Dateien konvertiert.",
+      msNoneFiles: "noch keine — die erste zählt beim Download oder Kopieren",
+      msNonePrompts: "noch keine — der erste zählt bei der Analyse",
       statsPrivacy: "Deine Statistik wird nur lokal auf deinem Rechner gespeichert — ausschließlich Zahlen, keine Inhalte, keine Dateinamen. Sie verlässt deinen PC nie.",
       statsResetBtn: "Statistik zurücksetzen",
       statsResetConfirm: "Wirklich? Erneut klicken zum Bestätigen",
@@ -1096,6 +1106,7 @@
       modelBtnNone: "none",
       modelBtnUniversal: "Other",
       converting: (name, isPdf) => `Converting “${name}”${isPdf ? ' (if it\'s an image PDF, OCR runs — may take a few minutes)' : ''} …`,
+      convResetBtn: "New file",
       connError: "⚠ Connection to the server failed. Is app.py still running?",
       unknownError: "Unknown error.",
       analyzeError: "Error during analysis.",
@@ -1148,6 +1159,9 @@
       msAll: "all milestones reached",
       fmtTitle: "Converter usage by format",
       fmtNames: { pdf: "PDF", docx: "Word", xlsx: "Excel", csv: "CSV", txt: "Text", pptx: "PowerPoint" },
+      fmtEmpty: "No files converted yet.",
+      msNoneFiles: "none yet — the first counts on download or copy",
+      msNonePrompts: "none yet — the first counts on analysis",
       statsPrivacy: "Your statistics are stored locally on your machine only — nothing but numbers, no content, no file names. They never leave your PC.",
       statsResetBtn: "Reset statistics",
       statsResetConfirm: "Sure? Click again to confirm",
@@ -1196,6 +1210,7 @@
     setText('previewLabel', t.previewLabel);
     setText('downloadBtn', t.downloadBtn);
     setText('copyBtn', t.copyBtn);
+    setText('convResetBtn', t.convResetBtn);
     // Trainer
     setHtml('ptInfo', t.ptInfo);
     document.getElementById('promptInput').placeholder = t.ptPlaceholder;
@@ -1408,6 +1423,25 @@
     } catch (e) { showStatus(convStatus, 'error', T().copyFail); }
   });
 
+  // D2: "Neue Datei" - Ergebnis wegräumen, Dropzone frisch machen.
+  // Wichtig für die Statistik: Der Zähl-Status des ALTEN Ergebnisses wird
+  // komplett verworfen (Payload weg, Sperre zu). Das NÄCHSTE Ergebnis
+  // bekommt in renderConvResult wieder eine frische Zähl-Freigabe.
+  document.getElementById('convResetBtn').addEventListener('click', () => {
+    convResult.classList.remove('show');
+    hideStatus(convStatus);
+    fileInput.value = '';          // erlaubt auch dieselbe Datei erneut
+    lastFullText = '';
+    lastDownload = null;
+    convStatsPayload = null;
+    convCounted = true;            // nichts Zählbares mehr offen
+    lastFileExt = '';
+    document.getElementById('preview').textContent = '';
+    document.getElementById('meta').innerHTML = '';
+    document.getElementById('note').textContent = '';
+    drop.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  });
+
   function flashBtn(id, text) {
     const btn = document.getElementById(id);
     const orig = btn.textContent;
@@ -1581,8 +1615,9 @@
     document.getElementById('donutTotal').textContent = total.toLocaleString(LOCALE());
   }
 
-  function msLine(label, count) {
+  function msLine(label, count, noneText) {
     const t = T();
+    if (count === 0) return `${label}: ${noneText}`;  // sanfter Leerzustand
     const reached = MILESTONES.filter(m => count >= m).pop();
     const next = MILESTONES.find(m => count < m);
     if (!reached) return `${label}: ${t.msNext(next)}`;
@@ -1611,15 +1646,22 @@
     document.getElementById('statBest').textContent =
       s.prompts_analyzed > 0 ? s.best_score : '–';
     document.getElementById('msList').innerHTML =
-      msLine(t.msFiles, s.files_converted) + '<br>' + msLine(t.msPrompts, s.prompts_analyzed);
+      msLine(t.msFiles, s.files_converted, t.msNoneFiles) + '<br>' +
+      msLine(t.msPrompts, s.prompts_analyzed, t.msNonePrompts);
+    // Format-Breakdown: im Leerzustand ein Hinweis statt sechs Nullbalken
+    const fmtBox = document.getElementById('formatBars');
     const maxCount = Math.max(1, ...Object.values(s.format_counts));
-    document.getElementById('formatBars').innerHTML =
-      Object.entries(s.format_counts).map(([key, val]) => `
-        <div class="fmt-row">
-          <span class="fmt-name">${t.fmtNames[key] || key}</span>
-          <div class="fmt-bar-track"><div class="fmt-bar" style="width:${val / maxCount * 100}%"></div></div>
-          <span class="fmt-count">${val}</span>
-        </div>`).join('');
+    if (Object.values(s.format_counts).every(v => v === 0)) {
+      fmtBox.innerHTML = `<div class="stat-sub" style="margin-top:0;">${t.fmtEmpty}</div>`;
+    } else {
+      fmtBox.innerHTML =
+        Object.entries(s.format_counts).map(([key, val]) => `
+          <div class="fmt-row">
+            <span class="fmt-name">${t.fmtNames[key] || key}</span>
+            <div class="fmt-bar-track"><div class="fmt-bar" style="width:${val / maxCount * 100}%"></div></div>
+            <span class="fmt-count">${val}</span>
+          </div>`).join('');
+    }
   }
 
   // Reset mit Sicherheitsabfrage: erster Klick "scharf schalten",
