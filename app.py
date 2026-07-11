@@ -134,7 +134,8 @@ def analyze():
     data = request.get_json(silent=True) or {}
     prompt = data.get("prompt", "")
     model = data.get("model", "claude")
-    result = analyze_prompt(prompt, model)
+    ui_lang = data.get("ui_lang", "de")
+    result = analyze_prompt(prompt, model, ui_lang=ui_lang)
     status = 200 if result.get("ok") else 400
     return jsonify(result), status
 
