@@ -146,14 +146,44 @@ def _rows_to_csv(rows) -> str:
 #   target_format: 'markdown' oder 'csv'
 #   note:         kurze Erklaerung fuer die Anzeige
 
+# Ueberschriften-Muster, die NIEMALS als Kopf-/Fusszeile entfernt werden
+# duerfen - auch wenn sie sich (nach Ziffern-Normalisierung) auf jeder
+# Seite "wiederholen". 'Kapitel 1' bis 'Kapitel 5' sind Struktur, kein Muell.
+_PROTECTED = re.compile(
+    r"^\s*(kapitel|abschnitt|artikel|teil|anhang|"
+    r"chapter|section|article|part|appendix)\b",
+    re.IGNORECASE,
+)
+
+
+def _removed_note(removed_lines, max_show=4):
+    """Formatiert die entfernten Kopf-/Fusszeilen fuer den Hinweistext,
+    damit der Nutzer Fehlgriffe sofort sehen kann (Transparenz)."""
+    if not removed_lines:
+        return ""
+    shown = ", ".join(f"'{l}'" for l in removed_lines[:max_show])
+    more = ""
+    if len(removed_lines) > max_show:
+        more = f" (+{len(removed_lines) - max_show} weitere Muster)"
+    return f" Entfernt: {shown}{more}."
+
+
 def _strip_repeating_headers_footers(pages_lines):
     """
     Entfernt Zeilen, die auf vielen Seiten identisch wiederkehren
     (typische Kopf-/Fusszeilen wie 'Seite X', Firmennamen, Copyright).
     Das ist echter, entfernbarer Token-Muell in mehrseitigen PDFs.
 
+    Sicherheitsregeln gegen Inhaltsverlust:
+      - Nur die ersten/letzten EDGE Zeilen einer Seite sind Kandidaten
+        (Kopf-/Fusszeilen stehen am Seitenrand, Inhalt in der Mitte).
+      - Ueberschriften-Muster (_PROTECTED, z.B. 'Kapitel 3') sind tabu.
+      - Ziffern werden nur bei kurzen Zeilen (<=40 Zeichen) normalisiert,
+        damit 'Seite 1'/'Seite 2' als ein Muster gelten - laengere Zeilen
+        muessen exakt uebereinstimmen.
+
     pages_lines: Liste von Seiten, jede Seite eine Liste von Zeilen.
-    Rueckgabe: (bereinigter_text, anzahl_entfernter_zeilen)
+    Rueckgabe: (bereinigter_text, anzahl_entfernter_zeilen, entfernte_muster)
     """
     from collections import Counter
 
@@ -161,27 +191,33 @@ def _strip_repeating_headers_footers(pages_lines):
     if n_pages < 2:
         # Bei 1 Seite gibt es keine "Wiederholung" -> nichts entfernen
         flat = "\n".join("\n".join(p) for p in pages_lines)
-        return flat, 0
+        return flat, 0, []
 
-    # Zeilen zaehlen, die auf mehreren Seiten exakt gleich vorkommen.
-    # Wir normalisieren Ziffern zu '#', damit 'Seite 1' und 'Seite 2'
-    # als dasselbe Muster erkannt werden.
+    EDGE = 2            # nur die aeussersten 2 Zeilen oben/unten pruefen
+    MAX_HEADER_LEN = 80  # laengere Zeilen sind sicher Inhalt
+
     def normalize(line):
-        return re.sub(r"\d+", "#", line.strip())
+        s = line.strip()
+        if len(s) <= 40:
+            return re.sub(r"\d+", "#", s)
+        return s
 
-    # Kopf-/Fusszeilen sind typischerweise KURZ. Lange Zeilen sind Inhalt
-    # und duerfen niemals entfernt werden, auch wenn sie zufaellig doppelt
-    # vorkommen. Grenze: max. 80 Zeichen.
-    MAX_HEADER_LEN = 80
+    def is_candidate(idx, page_len, line):
+        s = line.strip()
+        if not s or len(s) > MAX_HEADER_LEN:
+            return False
+        if _PROTECTED.match(s):
+            return False
+        return idx < EDGE or idx >= page_len - EDGE
 
     counter = Counter()
     for page in pages_lines:
-        # pro Seite nur eindeutige Zeilen zaehlen (sonst zaehlt Wiederholung
+        # pro Seite nur eindeutige Muster zaehlen (sonst zaehlt Wiederholung
         # innerhalb einer Seite mit)
         seen = set()
-        for line in page:
-            if len(line.strip()) > MAX_HEADER_LEN:
-                continue  # zu lang -> sicher Inhalt, nicht zaehlen
+        for idx, line in enumerate(page):
+            if not is_candidate(idx, len(page), line):
+                continue
             norm = normalize(line)
             if norm and norm not in seen:
                 seen.add(norm)
@@ -193,29 +229,33 @@ def _strip_repeating_headers_footers(pages_lines):
     junk_patterns = {norm for norm, cnt in counter.items() if cnt >= threshold}
 
     removed = 0
+    removed_lines = []
     cleaned_pages = []
     for page in pages_lines:
         kept = []
-        for line in page:
-            # nur kurze Zeilen ueberhaupt als Kandidat betrachten
-            if len(line.strip()) <= MAX_HEADER_LEN and normalize(line) in junk_patterns:
+        for idx, line in enumerate(page):
+            if is_candidate(idx, len(page), line) and normalize(line) in junk_patterns:
                 removed += 1
+                stripped = line.strip()
+                if stripped not in removed_lines:
+                    removed_lines.append(stripped)
                 continue
             kept.append(line)
         cleaned_pages.append(kept)
 
     flat = "\n".join("\n".join(p) for p in cleaned_pages)
-    return flat, removed
+    return flat, removed, removed_lines
 
 
-def _ocr_pdf(path: str):
+def _ocr_pages(path: str, page_numbers):
     """
-    Wandelt eine Bild-PDF per OCR (Texterkennung) in Text um.
-    Wird nur aufgerufen, wenn pdfplumber keinen Text findet.
+    Wandelt AUSGEWAEHLTE Seiten eines PDFs per OCR (Texterkennung) in Text um.
+    page_numbers: Liste von 1-basierten Seitennummern.
 
-    Rueckgabe: (text, fehler)
-      - Bei Erfolg: (erkannter_text, None)
-      - Bei fehlendem Tesseract o.ae.: ("", verstaendliche_fehlermeldung)
+    Rueckgabe: (texte, fehler)
+      - texte:  dict {seitennummer: erkannter_text} - kann bei einem Fehler
+                auch teilweise gefuellt sein (bereits erkannte Seiten).
+      - fehler: None bei Erfolg, sonst eine verstaendliche Fehlermeldung.
 
     Braucht das Programm 'Tesseract' auf dem Rechner sowie die Python-Pakete
     pdf2image und pytesseract. Fehlt etwas, geben wir eine klare Anleitung
@@ -226,10 +266,10 @@ def _ocr_pdf(path: str):
         from pdf2image import convert_from_path
         import pytesseract
     except ImportError:
-        return "", (
-            "Fuer Bild-PDFs wird OCR benoetigt. Bitte installiere die Pakete:\n"
+        return {}, (
+            "Fuer Bild-Seiten wird OCR benoetigt. Bitte installiere die Pakete:\n"
             "  pip install pdf2image pytesseract\n"
-            "und das Programm Tesseract (siehe ANLEITUNG.md, Abschnitt OCR)."
+            "und das Programm Tesseract (siehe README, Abschnitt OCR)."
         )
 
     # Falls wir Tesseract am Standardpfad gefunden haben, pytesseract dorthin zeigen.
@@ -241,71 +281,108 @@ def _ocr_pdf(path: str):
     try:
         pytesseract.get_tesseract_version()
     except Exception:
-        return "", (
+        return {}, (
             "Das Programm 'Tesseract' wurde nicht gefunden.\n"
             "Windows: Installer von https://github.com/UB-Mannheim/tesseract/wiki\n"
             "oder per winget: winget install -e --id UB-Mannheim.TesseractOCR\n"
-            "Nach der Installation Tool neu starten. Details in ANLEITUNG.md."
+            "Nach der Installation Tool neu starten. Details im README."
         )
 
-    # PDF Seite fuer Seite in Bilder wandeln und erkennen.
+    # Nur die angefragten Seiten in Bilder wandeln und erkennen.
     # 150 dpi ist ein guter Kompromiss aus Genauigkeit und Tempo.
     # poppler_path nur mitgeben, wenn wir ihn gefunden haben.
     convert_kwargs = {"dpi": 150}
     if _POPPLER_PATH:
         convert_kwargs["poppler_path"] = _POPPLER_PATH
-    try:
-        images = convert_from_path(path, **convert_kwargs)
-    except Exception as e:
-        # Meist fehlt 'poppler' (wird von pdf2image gebraucht)
-        return "", (
-            f"PDF konnte nicht in Bilder gewandelt werden ({e}).\n"
-            "Windows braucht dafuer 'poppler'.\n"
-            "Per winget: winget install -e --id oschwartz10612.Poppler\n"
-            "Anleitung in ANLEITUNG.md."
-        )
 
-    parts = []
-    # Sowohl Deutsch als auch Englisch versuchen (viele Dokumente sind gemischt)
-    lang = "deu+eng"
-    for img in images:
+    texts = {}
+    for n in page_numbers:
         try:
-            txt = pytesseract.image_to_string(img, lang=lang)
+            images = convert_from_path(path, first_page=n, last_page=n,
+                                        **convert_kwargs)
+        except Exception as e:
+            # Meist fehlt 'poppler' (wird von pdf2image gebraucht)
+            return texts, (
+                f"PDF-Seite {n} konnte nicht in ein Bild gewandelt werden ({e}).\n"
+                "Windows braucht dafuer 'poppler'.\n"
+                "Per winget: winget install -e --id oschwartz10612.Poppler\n"
+                "Anleitung im README."
+            )
+        if not images:
+            texts[n] = ""
+            continue
+        # Sowohl Deutsch als auch Englisch versuchen (viele Dokumente sind gemischt)
+        try:
+            txt = pytesseract.image_to_string(images[0], lang="deu+eng")
         except Exception:
             # Falls das deutsche Sprachpaket fehlt, nur Englisch
-            txt = pytesseract.image_to_string(img)
-        parts.append(txt)
+            txt = pytesseract.image_to_string(images[0])
+        texts[n] = txt
 
-    return "\n\n".join(parts), None
+    return texts, None
+
+
+# Ab wie vielen Zeichen extrahierten Texts gilt eine PDF-Seite als "Textseite"?
+# Darunter ist es praktisch sicher eine Bild-/Scan-Seite (oder leer).
+_PAGE_TEXT_MIN = 15
+
+# Grobe, dokumentierte Groessenordnung: was eine PDF-Seite als BILD an
+# Tokens kosten wuerde, wenn man sie direkt ans Modell gibt.
+_IMG_TOKENS_PER_PAGE = 1500
 
 
 def extract_pdf(path: str) -> dict:
     """PDF: Text -> Markdown. Wenn ueberwiegend Tabellen -> CSV.
-    Wenn kein Text da ist (Bild-PDF), automatisch OCR."""
+    Seiten ohne Text (Scans/Bilder) werden EINZELN per OCR erkannt -
+    auch in gemischten PDFs (z.B. Text-Deckblatt + gescannter Anhang)."""
     import pdfplumber
 
-    pages_lines = []
-    all_text_parts = []
+    page_texts = []       # extrahierter Text pro Seite (Index 0 = Seite 1)
+    extra_texts = []      # Text AUSSERHALB von Tabellen pro Seite (fuer CSV-Zweig)
     all_tables = []
+    n_images = 0
     with pdfplumber.open(path) as pdf:
         for page in pdf.pages:
             txt = page.extract_text() or ""
-            all_text_parts.append(txt)
-            pages_lines.append(txt.split("\n"))
-            for table in page.extract_tables():
-                if table:
-                    all_tables.append(table)
+            page_texts.append(txt)
+            n_images += len(page.images or [])
+            tables_on_page = page.find_tables()
+            for t in tables_on_page:
+                data = t.extract()
+                if data:
+                    all_tables.append(data)
+            # Begleittext ausserhalb der Tabellen-Bereiche merken, damit der
+            # CSV-Zweig ihn nicht stillschweigend verwirft.
+            if tables_on_page:
+                region = page
+                for t in tables_on_page:
+                    region = region.outside_bbox(t.bbox)
+                extra_texts.append(region.extract_text() or "")
+            else:
+                extra_texts.append(txt)
 
+    n_pages = len(page_texts)
     # raw_text = ungefilterte Extraktion (fuer Token-Vergleich "vorher")
-    raw_text = "\n".join(all_text_parts)
+    raw_text = "\n".join(page_texts)
     text_len = len(raw_text.strip())
 
-    # --- Bild-PDF-Erkennung ---
-    # Wenn ueber alle Seiten praktisch kein Text da ist, ist es eine Bild-PDF
-    # (gescannt oder aus Bildern gebaut). Dann greift OCR.
-    if text_len < 50:
-        ocr_text, ocr_error = _ocr_pdf(path)
-        if ocr_error:
+    # --- Bild-Seiten-Erkennung: PRO SEITE statt global ---
+    # Eine Seite mit praktisch keinem Text ist eine Bild-/Scan-Seite.
+    image_pages = [i for i, t in enumerate(page_texts, start=1)
+                   if len(t.strip()) < _PAGE_TEXT_MIN]
+    text_pages = [i for i in range(1, n_pages + 1) if i not in image_pages]
+
+    # Hinweis auf eingebettete Bilder in Text-PDFs (prinzipbedingt nicht
+    # extrahierbar - aber wir sagen es, statt zu schweigen).
+    image_note = ""
+    if n_images > 0 and text_pages:
+        image_note = (f" Hinweis: {n_images} eingebettete(s) Bild(er)/Grafik(en) "
+                      f"wurden nicht übernommen (nur Text ist extrahierbar).")
+
+    # ---- Fall 1: reine Bild-PDF (alle Seiten ohne Text) -> komplette OCR ----
+    if image_pages and not text_pages:
+        ocr_texts, ocr_error = _ocr_pages(path, image_pages)
+        if ocr_error and not any(t.strip() for t in ocr_texts.values()):
             # OCR nicht moeglich -> ehrlich melden statt leeres Ergebnis
             return {
                 "raw_text": "",
@@ -313,24 +390,82 @@ def extract_pdf(path: str) -> dict:
                 "target_format": "markdown",
                 "note": "BILD-PDF ERKANNT (kein Text enthalten). " + ocr_error,
             }
+        ocr_text = "\n\n".join(ocr_texts.get(i, "") for i in image_pages)
         md = _clean_text(ocr_text)
-        # Bei OCR ist "vorher" der Bild-Fall: Wir schaetzen, was das Modell
-        # als Bilder kosten wuerde (grob ~1500 Tokens pro Seite), damit die
-        # Ersparnis realistisch die Umwandlung Bild->Text abbildet.
-        n_pages = len(pages_lines)
+        note = (f"BILD-PDF per OCR erkannt ({n_pages} Seiten, Text war als Bild "
+                f"eingebettet). Als Bild kostet so ein PDF ein Vielfaches an Tokens "
+                f"- als Text ist es jetzt schlank lesbar.")
+        if ocr_error:
+            missing = [i for i in image_pages if not ocr_texts.get(i, "").strip()]
+            note = (f"ACHTUNG - UNVOLLSTÄNDIG: OCR brach ab, Seite(n) "
+                    f"{', '.join(map(str, missing))} fehlen im Ergebnis. "
+                    + ocr_error + " | " + note)
         return {
             "raw_text": ocr_text,
             "converted": md,
             "target_format": "markdown",
-            "note": (f"BILD-PDF per OCR erkannt ({n_pages} Seiten, Text war als Bild "
-                     f"eingebettet). Als Bild kostet so ein PDF ein Vielfaches an Tokens "
-                     f"- als Text ist es jetzt schlank lesbar."),
+            "note": note,
             "was_ocr": True,
             "n_pages": n_pages,
+            # "Vorher" = was die Seiten als BILDER kosten wuerden (Schaetzung)
+            "tokens_before_hint": n_pages * _IMG_TOKENS_PER_PAGE,
         }
 
+    # ---- Fall 2: GEMISCHTES PDF (Textseiten + Bildseiten) ----
+    if image_pages and text_pages:
+        ocr_texts, ocr_error = _ocr_pages(path, image_pages)
+        # Seiten in ORIGINAL-Reihenfolge zusammensetzen:
+        # Textseiten direkt, Bildseiten aus der OCR.
+        assembled = []
+        for i in range(1, n_pages + 1):
+            if i in ocr_texts and ocr_texts[i].strip():
+                assembled.append(ocr_texts[i])
+            elif i in image_pages:
+                assembled.append("")  # OCR fehlgeschlagen -> Seite fehlt
+            else:
+                assembled.append(page_texts[i - 1])
+
+        pages_lines = [t.split("\n") for t in assembled]
+        deduped_text, removed, removed_patterns = \
+            _strip_repeating_headers_footers(pages_lines)
+        md = _clean_text(deduped_text)
+
+        ocr_ok = [i for i in image_pages if ocr_texts.get(i, "").strip()]
+        ocr_failed = [i for i in image_pages if i not in ocr_ok]
+        if ocr_failed:
+            note = (f"ACHTUNG - UNVOLLSTÄNDIG: Gemischtes PDF, aber Seite(n) "
+                    f"{', '.join(map(str, ocr_failed))} sind Bild-Seiten und "
+                    f"konnten nicht per OCR gelesen werden. "
+                    f"{(ocr_error or '')} "
+                    f"Die {len(text_pages)} Textseite(n) sind enthalten.")
+        else:
+            note = (f"Gemischtes PDF: {len(text_pages)} Textseite(n) direkt "
+                    f"extrahiert, Seite(n) {', '.join(map(str, ocr_ok))} per OCR "
+                    f"erkannt (waren als Bild eingebettet).")
+        if removed > 0:
+            note += (f" {removed} wiederkehrende Kopf-/Fusszeilen entfernt."
+                     + _removed_note(removed_patterns))
+
+        # Korrigierte Token-Rechnung: Textseiten zaehlen als Text,
+        # Bildseiten als geschaetzte Bild-Kosten.
+        text_raw = "\n".join(page_texts[i - 1] for i in text_pages)
+        before_hint = (count_tokens(text_raw)["count"]
+                       + len(image_pages) * _IMG_TOKENS_PER_PAGE)
+        return {
+            "raw_text": "\n".join(assembled),
+            "converted": md,
+            "target_format": "markdown",
+            "note": note,
+            "was_ocr": True,
+            "n_pages": n_pages,
+            "tokens_before_hint": before_hint,
+        }
+
+    # ---- Fall 3: normale Text-PDF ----
+    pages_lines = [t.split("\n") for t in page_texts]
     # bereinigt: wiederkehrende Kopf-/Fusszeilen raus
-    deduped_text, removed_lines = _strip_repeating_headers_footers(pages_lines)
+    deduped_text, removed, removed_patterns = \
+        _strip_repeating_headers_footers(pages_lines)
     # Grobe Heuristik: viele Tabellenzeilen + wenig Fliesstext -> Tabellen-PDF
     table_cells = sum(len(r) for t in all_tables for r in t)
 
@@ -339,41 +474,58 @@ def extract_pdf(path: str) -> dict:
         # Alle Tabellen untereinander, durch Leerzeile getrennt
         csv_blocks = [_rows_to_csv(t) for t in all_tables]
         converted = "\n\n".join(csv_blocks)
+        note = ("PDF enthält überwiegend Tabellen -> als CSV konvertiert "
+                "(token-effizienteste Form für Daten).")
+        # DEFENSIV: Fliesstext ausserhalb der Tabellen darf nicht
+        # stillschweigend verloren gehen - er kommt als Begleittext dazu.
+        companion = _clean_text("\n".join(extra_texts))
+        if companion:
+            converted = (f"# Begleittext (ausserhalb der Tabellen):\n"
+                         f"{companion}\n\n{converted}")
+            note += " Begleittext ausserhalb der Tabellen wurde mit übernommen."
         return {
             "raw_text": raw_text,
             "converted": converted,
             "target_format": "csv",
-            "note": "PDF enthaelt ueberwiegend Tabellen -> als CSV konvertiert (token-effizienteste Form fuer Daten).",
+            "note": note + image_note,
         }
 
     # Standardfall: Fliesstext -> Markdown (kopf-/fusszeilenbereinigt)
     md = _clean_text(deduped_text)
-    if removed_lines > 0:
+    if removed > 0:
         note = (f"PDF-Fliesstext als Markdown bereinigt. "
-                f"{removed_lines} wiederkehrende Kopf-/Fusszeilen entfernt (Token-Muell).")
+                f"{removed} wiederkehrende Kopf-/Fusszeilen entfernt."
+                + _removed_note(removed_patterns))
     else:
         note = "PDF-Fliesstext extrahiert und als sauberes Markdown bereinigt."
     return {
         "raw_text": raw_text,
         "converted": md,
         "target_format": "markdown",
-        "note": note,
+        "note": note + image_note,
     }
 
 
 def extract_docx(path: str) -> dict:
-    """Word: Ueberschriften -> Markdown-Headings, Tabellen -> Markdown-Tabellen."""
+    """Word: Ueberschriften -> Markdown-Headings, Tabellen -> Markdown-Tabellen.
+    Wichtig: Absaetze und Tabellen bleiben in ORIGINAL-Reihenfolge
+    (frueher landeten alle Tabellen gesammelt am Ende - Bezuege wie
+    'die folgende Tabelle' waren damit kaputt)."""
     import docx
+    from docx.oxml.text.paragraph import CT_P
+    from docx.oxml.table import CT_Tbl
+    from docx.text.paragraph import Paragraph
+    from docx.table import Table
 
     doc = docx.Document(path)
     md_parts = []
     raw_parts = []
 
-    for para in doc.paragraphs:
+    def render_paragraph(para):
         text = para.text.strip()
         raw_parts.append(para.text)
         if not text:
-            continue
+            return
         style = (para.style.name or "").lower()
         if style.startswith("heading 1") or style == "title":
             md_parts.append(f"# {text}")
@@ -386,15 +538,14 @@ def extract_docx(path: str) -> dict:
         else:
             md_parts.append(text)
 
-    # Tabellen als Markdown-Tabellen anhaengen.
-    # Wichtig: die Tabellenzeilen muessen DIREKT untereinander stehen
-    # (ein Block mit einfachen Zeilenumbruechen), sonst ist die Markdown-
-    # Tabelle ungueltig. Deshalb bauen wir jede Tabelle als einen String.
-    for table in doc.tables:
+    def render_table(table):
+        # Wichtig: die Tabellenzeilen muessen DIREKT untereinander stehen
+        # (ein Block mit einfachen Zeilenumbruechen), sonst ist die Markdown-
+        # Tabelle ungueltig. Deshalb bauen wir jede Tabelle als einen String.
         rows = [[cell.text.strip() for cell in row.cells] for row in table.rows]
         raw_parts.append("\n".join("\t".join(r) for r in rows))
         if not rows:
-            continue
+            return
         header = rows[0]
         table_lines = []
         table_lines.append("| " + " | ".join(header) + " |")
@@ -405,47 +556,88 @@ def extract_docx(path: str) -> dict:
             table_lines.append("| " + " | ".join(r) + " |")
         md_parts.append("\n".join(table_lines))
 
+    # Ueber die Body-Kinder in Dokument-Reihenfolge laufen:
+    # CT_P = Absatz, CT_Tbl = Tabelle. Andere Elemente (z.B. Abschnitts-
+    # eigenschaften) sind kein Inhalt und werden uebersprungen.
+    for child in doc.element.body.iterchildren():
+        if isinstance(child, CT_P):
+            render_paragraph(Paragraph(child, doc))
+        elif isinstance(child, CT_Tbl):
+            render_table(Table(child, doc))
+
     converted = _clean_text("\n\n".join(md_parts))
     raw_text = "\n".join(raw_parts)
     return {
         "raw_text": raw_text,
         "converted": converted,
         "target_format": "markdown",
-        "note": "Word-Struktur (Ueberschriften, Listen, Tabellen) in natives Markdown uebersetzt.",
+        "note": ("Word-Struktur (Überschriften, Listen, Tabellen) in natives "
+                 "Markdown übersetzt - in Original-Reihenfolge. Hinweis: Fußnoten, "
+                 "Textboxen und Kopf-/Fußzeilen kann die Word-Bibliothek "
+                 "prinzipbedingt nicht extrahieren."),
     }
 
 
 def extract_xlsx(path: str) -> dict:
-    """Excel: jedes Blatt -> CSV. Daten gehoeren in CSV (am wenigsten Tokens)."""
+    """Excel: jedes Blatt -> CSV. Daten gehoeren in CSV (am wenigsten Tokens).
+
+    Formel-Zellen: Wir lesen das Workbook DOPPELT - einmal mit data_only=True
+    (liefert von Excel zwischengespeicherte Rechenergebnisse) und einmal mit
+    data_only=False (liefert die Formel-Strings). Bei programmatisch erzeugten
+    Dateien existiert kein Ergebnis-Cache; frueher wurden solche Zellen zu
+    LEEREN Feldern. Jetzt geben wir stattdessen die Formel selbst aus."""
     import openpyxl
 
-    wb = openpyxl.load_workbook(path, data_only=True, read_only=True)
+    wb_val = openpyxl.load_workbook(path, data_only=True, read_only=True)
+    wb_formula = openpyxl.load_workbook(path, data_only=False, read_only=True)
     blocks = []
     raw_parts = []
-    for ws in wb.worksheets:
+    formula_fallbacks = 0
+
+    for ws_val, ws_formula in zip(wb_val.worksheets, wb_formula.worksheets):
         rows = []
-        for row in ws.iter_rows(values_only=True):
+        formula_rows = [list(r) for r in ws_formula.iter_rows(values_only=True)]
+        for r_idx, row in enumerate(ws_val.iter_rows(values_only=True)):
+            cells = list(row) if row is not None else []
+            f_row = formula_rows[r_idx] if r_idx < len(formula_rows) else []
+            merged = []
+            for c_idx, val in enumerate(cells):
+                if val is None and c_idx < len(f_row):
+                    f_val = f_row[c_idx]
+                    # Zelle hat kein zwischengespeichertes Ergebnis, aber
+                    # eine Formel -> Formel-String ausgeben statt Leere.
+                    if isinstance(f_val, str) and f_val.startswith("="):
+                        merged.append(f_val)
+                        formula_fallbacks += 1
+                        continue
+                merged.append(val)
             # komplett leere Zeilen ueberspringen
-            if row is None or all(c is None for c in row):
+            if not merged or all(c is None for c in merged):
                 continue
-            rows.append(list(row))
+            rows.append(merged)
         if not rows:
             continue
         csv_text = _rows_to_csv(rows)
         raw_parts.append(csv_text)
         # Blattname als Kommentarzeile, damit man mehrere Blaetter unterscheidet
-        if len(wb.worksheets) > 1:
-            blocks.append(f"# Blatt: {ws.title}\n{csv_text}")
+        if len(wb_val.worksheets) > 1:
+            blocks.append(f"# Blatt: {ws_val.title}\n{csv_text}")
         else:
             blocks.append(csv_text)
 
     converted = "\n\n".join(blocks).strip()
     raw_text = "\n\n".join(raw_parts)
+    note = ("Excel-Daten als CSV exportiert - das token-effizienteste Format "
+            "für Tabellen (bis zu 3x weniger als JSON/HTML).")
+    if formula_fallbacks > 0:
+        note += (f" Hinweis: {formula_fallbacks} Formel-Zelle(n) ohne "
+                 f"gespeichertes Ergebnis - die Formel selbst wurde ausgegeben "
+                 f"(Datei einmal in Excel öffnen und speichern liefert die Werte).")
     return {
         "raw_text": raw_text,
         "converted": converted,
         "target_format": "csv",
-        "note": "Excel-Daten als CSV exportiert - das token-effizienteste Format fuer Tabellen (bis zu 3x weniger als JSON/HTML).",
+        "note": note,
     }
 
 
@@ -482,11 +674,29 @@ def extract_pptx(path: str) -> dict:
     result = md.convert(path)
     text = result.text_content or ""
     cleaned = _clean_text(text)
+
+    note = "PowerPoint-Folien in Markdown umgewandelt (Text pro Folie extrahiert)."
+    # Fairness-Hinweis: Sprechernotizen landen mit im Output - das ist je
+    # nach Datei gewollt oder ueberraschend, deshalb sagen wir es dazu.
+    try:
+        from pptx import Presentation
+        prs = Presentation(path)
+        n_notes = sum(
+            1 for slide in prs.slides
+            if slide.has_notes_slide
+            and (slide.notes_slide.notes_text_frame.text or "").strip()
+        )
+        if n_notes > 0:
+            note += (f" Hinweis: {n_notes} Folie(n) enthalten Sprechernotizen - "
+                     f"diese sind im Output mit enthalten.")
+    except Exception:
+        pass  # Hinweis ist optional - Extraktion selbst haengt nicht daran
+
     return {
         "raw_text": text,
         "converted": cleaned,
         "target_format": "markdown",
-        "note": "PowerPoint-Folien in Markdown umgewandelt (Text pro Folie extrahiert).",
+        "note": note,
     }
 
 
@@ -584,16 +794,20 @@ def convert_file(path: str, add_xml: bool = False, target_model: str = None,
     # "nachher": der bereinigte, optimierte Inhalt OHNE XML-Deko.
     after_clean = count_tokens(converted)
 
-    # Sonderfall Bild-PDF (OCR): Hier waere der ehrliche "Vorher"-Wert NICHT
-    # der OCR-Text, sondern was das LLM zahlen muesste, um die Seiten als
-    # BILDER zu verarbeiten. Hochaufloesende Bildseiten kosten grob ~1500
-    # Tokens/Seite. Wir weisen das transparent als Schaetzung aus.
+    # Sonderfall OCR (Bild-PDF oder gemischtes PDF): Hier liefert der
+    # Extraktor einen ehrlichen "Vorher"-Wert mit (tokens_before_hint):
+    #   - reine Bild-PDF: Seiten x ~1500 Tokens (Kosten als Bild)
+    #   - gemischtes PDF: Text der Textseiten + Bildseiten x ~1500 Tokens
+    # Bild-Kosten sind immer eine Schaetzung, das weisen wir transparent aus.
     is_ocr = result.get("was_ocr", False)
-    if is_ocr:
+    if "tokens_before_hint" in result:
+        before_count = result["tokens_before_hint"]
+        before_method = "estimate"
+    elif is_ocr:
+        # Fallback fuer Extraktoren ohne Hint (sollte nicht vorkommen)
         n_pages = result.get("n_pages", 1)
-        IMG_TOKENS_PER_PAGE = 1500  # grobe, dokumentierte Groessenordnung
-        before_count = n_pages * IMG_TOKENS_PER_PAGE
-        before_method = "estimate"  # Bild-Kosten sind immer eine Schaetzung
+        before_count = n_pages * _IMG_TOKENS_PER_PAGE
+        before_method = "estimate"
     else:
         before = count_tokens(result["raw_text"])
         before_count = before["count"]
