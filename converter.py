@@ -322,6 +322,17 @@ def _ocr_pages(path: str, page_numbers):
     return texts, None
 
 
+class UnreadablePdfError(ValueError):
+    """PDF, bei der KEINE Seite lesbar war (auch nicht per OCR).
+    Die Exception-Meldung ist die verstaendliche Meldung fuers UI;
+    'detail' traegt den rohen technischen Grund (z.B. die pdfminer-
+    Exception der ersten kaputten Seite) fuer die Fehlersuche."""
+
+    def __init__(self, message: str, detail: str = ""):
+        super().__init__(message)
+        self.detail = detail
+
+
 # Ab wie vielen Zeichen extrahierten Texts gilt eine PDF-Seite als "Textseite"?
 # Darunter ist es praktisch sicher eine Bild-/Scan-Seite (oder leer).
 _PAGE_TEXT_MIN = 15
@@ -341,29 +352,45 @@ def extract_pdf(path: str) -> dict:
     extra_texts = []      # Text AUSSERHALB von Tabellen pro Seite (fuer CSV-Zweig)
     all_tables = []
     n_images = 0
+    broken_pages = []     # Seiten, deren Extraktion eine Exception warf
+    first_error = ""      # technischer Grund der ersten kaputten Seite
     with pdfplumber.open(path) as pdf:
-        for page in pdf.pages:
-            txt = page.extract_text() or ""
-            page_texts.append(txt)
-            n_images += len(page.images or [])
-            tables_on_page = page.find_tables()
-            for t in tables_on_page:
-                data = t.extract()
-                if data:
-                    all_tables.append(data)
-            # Begleittext ausserhalb der Tabellen-Bereiche merken, damit der
-            # CSV-Zweig ihn nicht stillschweigend verwirft.
-            # strict=False: reale PDFs enthalten Tabellen, deren Box durch
-            # Rundungsartefakte um Bruchteile eines Punkts ueber den
-            # Seitenrand ragt - pdfplumber (0.11.x) wirft dann per Default
-            # ValueError statt still zu beschneiden.
-            if tables_on_page:
-                region = page
+        for page_no, page in enumerate(pdf.pages, start=1):
+            # JEDE Seite in ihrem eigenen try/except: eine einzelne kaputte
+            # Seite (z.B. pdfminer-ValueError) darf nicht mehr die ganze
+            # Datei mitreissen. Kaputte Seiten bleiben ohne Text und werden
+            # dadurch unten wie Bildseiten behandelt (OCR-Rettung).
+            try:
+                txt = page.extract_text() or ""
+                page_images = len(page.images or [])
+                tables_on_page = page.find_tables()
+                page_tables = []
                 for t in tables_on_page:
-                    region = region.outside_bbox(t.bbox, strict=False)
-                extra_texts.append(region.extract_text() or "")
-            else:
-                extra_texts.append(txt)
+                    data = t.extract()
+                    if data:
+                        page_tables.append(data)
+                # Begleittext ausserhalb der Tabellen-Bereiche merken, damit
+                # der CSV-Zweig ihn nicht stillschweigend verwirft.
+                # strict=False: reale PDFs enthalten Tabellen, deren Box durch
+                # Rundungsartefakte um Bruchteile eines Punkts ueber den
+                # Seitenrand ragt - pdfplumber (0.11.x) wirft dann per Default
+                # ValueError statt still zu beschneiden.
+                if tables_on_page:
+                    region = page
+                    for t in tables_on_page:
+                        region = region.outside_bbox(t.bbox, strict=False)
+                    extra = region.extract_text() or ""
+                else:
+                    extra = txt
+            except Exception as e:
+                broken_pages.append(page_no)
+                if not first_error:
+                    first_error = f"Seite {page_no}: {e}"
+                txt, extra, page_tables, page_images = "", "", [], 0
+            page_texts.append(txt)
+            extra_texts.append(extra)
+            all_tables.extend(page_tables)
+            n_images += page_images
 
     n_pages = len(page_texts)
     # raw_text = ungefilterte Extraktion (fuer Token-Vergleich "vorher")
@@ -387,18 +414,43 @@ def extract_pdf(path: str) -> dict:
     if image_pages and not text_pages:
         ocr_texts, ocr_error = _ocr_pages(path, image_pages)
         if ocr_error and not any(t.strip() for t in ocr_texts.values()):
+            if broken_pages and len(broken_pages) == n_pages:
+                # ALLE Seiten warfen Exceptions und OCR konnte nichts retten
+                # -> sauberer Fehler (HTTP 400) ueber den bestehenden Pfad,
+                # mit verstaendlicher Meldung statt roher pdfminer-Exception.
+                raise UnreadablePdfError(
+                    f"Keine der {n_pages} Seite(n) dieser PDF konnte gelesen "
+                    f"werden - auch nicht per Texterkennung. Die Datei ist "
+                    f"vermutlich beschädigt.",
+                    detail=" | ".join(x for x in (first_error, ocr_error) if x))
             # OCR nicht moeglich -> ehrlich melden statt leeres Ergebnis
+            note = "BILD-PDF ERKANNT (kein Text enthalten). " + ocr_error
+            if broken_pages:
+                note = (f"ACHTUNG - UNVOLLSTÄNDIG: Seite(n) "
+                        f"{', '.join(map(str, broken_pages))} konnte(n) nicht "
+                        f"gelesen werden und wurde(n) übersprungen. " + note)
             return {
                 "raw_text": "",
                 "converted": "",
                 "target_format": "markdown",
-                "note": "BILD-PDF ERKANNT (kein Text enthalten). " + ocr_error,
+                "note": note,
             }
         ocr_text = "\n\n".join(ocr_texts.get(i, "") for i in image_pages)
         md = _clean_text(ocr_text)
-        note = (f"BILD-PDF per OCR erkannt ({n_pages} Seiten, Text war als Bild "
-                f"eingebettet). Als Bild kostet so ein PDF ein Vielfaches an Tokens "
-                f"- als Text ist es jetzt schlank lesbar.")
+        rescued_broken = [i for i in broken_pages
+                          if ocr_texts.get(i, "").strip()]
+        if broken_pages and len(broken_pages) == n_pages:
+            # Keine echte Bild-PDF, sondern defekte Seiten - ehrlich benennen.
+            note = (f"PDF-Seiten ließen sich nicht direkt lesen und wurden "
+                    f"per Texterkennung (OCR) gerettet ({n_pages} Seiten).")
+        else:
+            note = (f"BILD-PDF per OCR erkannt ({n_pages} Seiten, Text war als Bild "
+                    f"eingebettet). Als Bild kostet so ein PDF ein Vielfaches an Tokens "
+                    f"- als Text ist es jetzt schlank lesbar.")
+            if rescued_broken:
+                note += (f" Seite(n) {', '.join(map(str, rescued_broken))} "
+                         f"ließ(en) sich nicht direkt lesen und wurde(n) per "
+                         f"Texterkennung gerettet.")
         if ocr_error:
             missing = [i for i in image_pages if not ocr_texts.get(i, "").strip()]
             note = (f"ACHTUNG - UNVOLLSTÄNDIG: OCR brach ab, Seite(n) "
@@ -436,16 +488,34 @@ def extract_pdf(path: str) -> dict:
 
         ocr_ok = [i for i in image_pages if ocr_texts.get(i, "").strip()]
         ocr_failed = [i for i in image_pages if i not in ocr_ok]
+        # Defekte Seiten (Exception im Extraktions-Loop) von echten
+        # Bild-Seiten unterscheiden - die Note soll nicht luegen.
+        rescued_broken = [i for i in ocr_ok if i in broken_pages]
+        image_ok = [i for i in ocr_ok if i not in broken_pages]
         if ocr_failed:
-            note = (f"ACHTUNG - UNVOLLSTÄNDIG: Gemischtes PDF, aber Seite(n) "
-                    f"{', '.join(map(str, ocr_failed))} sind Bild-Seiten und "
-                    f"konnten nicht per OCR gelesen werden. "
-                    f"{(ocr_error or '')} "
+            failed_image = [i for i in ocr_failed if i not in broken_pages]
+            failed_broken = [i for i in ocr_failed if i in broken_pages]
+            parts = []
+            if failed_image:
+                parts.append(f"Seite(n) {', '.join(map(str, failed_image))} "
+                             f"sind Bild-Seiten und konnten nicht per OCR "
+                             f"gelesen werden.")
+            if failed_broken:
+                parts.append(f"Seite(n) {', '.join(map(str, failed_broken))} "
+                             f"konnte(n) nicht gelesen werden und wurde(n) "
+                             f"übersprungen.")
+            note = (f"ACHTUNG - UNVOLLSTÄNDIG: Gemischtes PDF, aber "
+                    + " ".join(parts) + f" {(ocr_error or '')} "
                     f"Die {len(text_pages)} Textseite(n) sind enthalten.")
         else:
-            note = (f"Gemischtes PDF: {len(text_pages)} Textseite(n) direkt "
-                    f"extrahiert, Seite(n) {', '.join(map(str, ocr_ok))} per OCR "
-                    f"erkannt (waren als Bild eingebettet).")
+            note = f"Gemischtes PDF: {len(text_pages)} Textseite(n) direkt extrahiert."
+            if image_ok:
+                note += (f" Seite(n) {', '.join(map(str, image_ok))} per OCR "
+                         f"erkannt (waren als Bild eingebettet).")
+        if rescued_broken:
+            note += (f" Seite(n) {', '.join(map(str, rescued_broken))} "
+                     f"ließ(en) sich nicht direkt lesen und wurde(n) per "
+                     f"Texterkennung gerettet.")
         if removed > 0:
             note += (f" {removed} wiederkehrende Kopf-/Fusszeilen entfernt."
                      + _removed_note(removed_patterns))
@@ -785,6 +855,11 @@ def convert_file(path: str, add_xml: bool = False, target_model: str = None,
 
     try:
         result = extractor(path)
+    except UnreadablePdfError as e:
+        # Verstaendliche Hauptmeldung; der rohe technische Grund kommt
+        # separat mit (fuers UI als ausklappbares Detail, nicht als
+        # Hauptfehler).
+        return {"ok": False, "error": str(e), "error_detail": e.detail}
     except Exception as e:
         return {"ok": False, "error": f"Fehler beim Lesen der Datei: {e}"}
 
