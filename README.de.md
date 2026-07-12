@@ -4,7 +4,7 @@
 
 ![Lizenz: MIT](https://img.shields.io/badge/license-MIT-blue)
 ![Python 3.12](https://img.shields.io/badge/python-3.12-blue)
-![Tests: 127 bestanden](https://img.shields.io/badge/tests-127%20passing-brightgreen)
+![Tests: 136 bestanden](https://img.shields.io/badge/tests-136%20passing-brightgreen)
 ![100% lokal](https://img.shields.io/badge/privacy-100%25%20lokal-blueviolet)
 
 Prisma ist eine lokale Browser-Oberfläche mit drei Werkzeugen für die Arbeit mit KI-Modellen: einem **Datei-Konverter**, der PDF, Word, Excel, CSV, TXT und PowerPoint in token-effiziente Formate wandelt, einem **Prompt-Trainer**, der die Struktur deiner Prompts regelbasiert bewertet und dir beim Lernen hilft, und einer **Statistik**, die deine Ersparnis zeigt. **Alles läuft komplett lokal auf deinem Rechner** — es gibt keine einzige externe Verbindung, keine Datei und kein Prompt verlässt deinen PC. Ein eigener Test (`tests/test_privacy.py`) beweist das bei jedem Testlauf.
@@ -19,7 +19,7 @@ Prisma ist eine lokale Browser-Oberfläche mit drei Werkzeugen für die Arbeit m
 
 ## Was die Werkzeuge können
 
-1. **Datei-Konverter**: Fließtext wird Markdown, Tabellen werden CSV — verpackt passend für dein KI-Modell (Claude → XML-Tags, GPT → Markdown-Abschnitte, Gemini → klare Gliederung). Bild-PDFs und gemischte PDFs (Text + Scans) werden automatisch per **OCR** erkannt, seitenweise, damit nichts verloren geht. Die Ergebnisleiste mit Download, **„Ordner öffnen"**, Kopieren und „Neue Datei" bleibt beim Scrollen sichtbar.
+1. **Datei-Konverter**: Fließtext wird Markdown, Tabellen werden CSV — verpackt passend für dein KI-Modell (Claude → XML-Tags, GPT → Markdown-Abschnitte, Gemini → klare Gliederung). Bild-PDFs und gemischte PDFs (Text + Scans) werden automatisch per **OCR** erkannt, seitenweise, damit nichts verloren geht. Du kannst **mehrere Dateien gleichzeitig** reinziehen (bis zu 20): sie werden nacheinander in eine Listenansicht mit Status pro Datei konvertiert, und die erfolgreichen lädst du als **eine ZIP** herunter (jede Datei trägt ihre eigene ID durch die ganze Kette, Vertauschung ist damit ausgeschlossen); fehlgeschlagene Dateien bleiben klar markiert und wandern nie in den Download. Bei einer einzelnen Datei erscheint weiterhin die gewohnte Ergebnisleiste mit Download, **„Ordner öffnen"**, Kopieren und „Neue Datei", die beim Scrollen sichtbar bleibt.
 2. **Prompt-Trainer**: bewertet die **Struktur** eines Prompts mit nachvollziehbaren Regeln (bewusst **keine KI**), zeigt einen Score (0–100) mit Ampel, erklärt jeden Check mit ✗/✓-Beispielen und baut eine modellspezifische Vorlage mit [Platzhalter-Fragen], die du selbst ausfüllst — genau dabei lernst du. Mit Demo-Buttons und Lernschleife.
 3. **Statistik**: bearbeitete Dateien, analysierte Prompts, gesparte Tokens (mit Seiten- und Kostenschätzung, klar als Schätzung gekennzeichnet), Score-Verteilung, Meilensteine, Format-Nutzung — und ein Bereich „Ausgaben verwalten" zum Aufräumen.
 
@@ -75,7 +75,7 @@ Der Anspruch ist nicht „es geht nie etwas verloren", sondern: **es geht nichts
 
 ## Tests
 
-127 Tests in 12 Suiten, die ihre Testdateien selbst konstruieren (zusätzlich benötigt: `reportlab`, `playwright`). Für alle außer den ersten beiden muss der Server laufen (`python app.py`):
+136 Tests in 13 Suiten, die ihre Testdateien selbst konstruieren (zusätzlich benötigt: `reportlab`, `playwright`). `test_block1`, `test_block2` und `test_blockI_batch` nutzen den Code direkt bzw. den Flask-Testclient; für alle anderen muss der Server laufen (`python app.py`):
 
 ```powershell
 python tests/test_block1.py        # Konverter-Kern (PDF/DOCX/XLSX/PPTX)
@@ -90,6 +90,7 @@ python tests/test_privacy.py       # Null externe Verbindungen (Beweis)
 python tests/test_blockG_dom.py    # Ergebnisleiste + Ordner-öffnen-Button
 python tests/test_blockH_dom.py    # Fehleranzeige (klare Meldung + ausklappbares Detail)
 python tests/test_pdf_robust.py    # PDF-Robustheit (Bounding-Box-Artefakte, seitenweise OCR)
+python tests/test_blockI_batch.py  # Batch-Konvertierung (eigene IDs, keine Vertauschung, ZIP, Limit)
 ```
 
 ## Lizenz

@@ -4,7 +4,7 @@
 
 ![License: MIT](https://img.shields.io/badge/license-MIT-blue)
 ![Python 3.12](https://img.shields.io/badge/python-3.12-blue)
-![Tests: 127 passing](https://img.shields.io/badge/tests-127%20passing-brightgreen)
+![Tests: 136 passing](https://img.shields.io/badge/tests-136%20passing-brightgreen)
 ![100% local](https://img.shields.io/badge/privacy-100%25%20local-blueviolet)
 
 Prisma is a local browser UI with three tools for working with AI models: a **file converter** that turns PDF, Word, Excel, CSV, TXT and PowerPoint into token-efficient formats, a **prompt trainer** that rates the structure of your prompts with transparent rules and helps you learn, and a **statistics** tab that shows your savings. **Everything runs entirely on your machine** — there is not a single external connection; no file and no prompt ever leaves your PC. A dedicated test (`tests/test_privacy.py`) proves this on every test run.
@@ -19,7 +19,7 @@ Prisma is a local browser UI with three tools for working with AI models: a **fi
 
 ## What the tools do
 
-1. **File Converter**: prose becomes Markdown, tables become CSV — wrapped to fit your AI model (Claude → XML tags, GPT → Markdown sections, Gemini → clear structure). Image PDFs and mixed PDFs (text + scans) are detected automatically and processed with **OCR**, page by page, so nothing gets lost. The result bar with download, **"Open folder"**, copy and "New file" stays visible while scrolling.
+1. **File Converter**: prose becomes Markdown, tables become CSV — wrapped to fit your AI model (Claude → XML tags, GPT → Markdown sections, Gemini → clear structure). Image PDFs and mixed PDFs (text + scans) are detected automatically and processed with **OCR**, page by page, so nothing gets lost. Drop in **multiple files at once** (up to 20): they are converted one after another into a list view with a per-file status, and the successful ones download as a **single ZIP** (each file keeps its own ID through the whole chain, so results can never be mixed up); failed files stay clearly marked and never enter the download. A single file still shows the familiar result bar with download, **"Open folder"**, copy and "New file", which stays visible while scrolling.
 2. **Prompt Trainer**: rates the **structure** of a prompt with transparent rules (deliberately **no AI**), shows a score (0–100) with a traffic light, explains every check with ✗/✓ examples and builds a model-specific template with [placeholder questions] you fill in yourself — that's exactly how you learn. With demo buttons and a learning loop.
 3. **Statistics**: files processed, prompts analyzed, tokens saved (with page and cost estimates, clearly labelled as estimates), score distribution, milestones, format usage — plus a "Manage outputs" section for cleaning up.
 
@@ -75,7 +75,7 @@ The promise is not "nothing is ever lost" but: **nothing is lost silently.** Wha
 
 ## Tests
 
-127 tests in 12 suites that construct their own test files (additionally required: `reportlab`, `playwright`). All except the first two need the server running (`python app.py`):
+136 tests in 13 suites that construct their own test files (additionally required: `reportlab`, `playwright`). `test_block1`, `test_block2` and `test_blockI_batch` use the code directly / the Flask test client; all others need the server running (`python app.py`):
 
 ```powershell
 python tests/test_block1.py        # Converter core (PDF/DOCX/XLSX/PPTX)
@@ -90,6 +90,7 @@ python tests/test_privacy.py       # Zero external connections (proof)
 python tests/test_blockG_dom.py    # Result bar + open-folder button
 python tests/test_blockH_dom.py    # Error display (clear message + collapsible detail)
 python tests/test_pdf_robust.py    # PDF robustness (bounding-box artifacts, page-wise OCR)
+python tests/test_blockI_batch.py  # Batch conversion (unique IDs, no swap, ZIP, limit)
 ```
 
 ## License

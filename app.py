@@ -12,9 +12,11 @@ Alles laeuft nur auf deinem Rechner - keine Datei verlaesst deinen PC.
 Start:  python app.py
 """
 
+import io
 import os
 import json
 import uuid
+import zipfile
 import tempfile
 import threading
 
@@ -37,6 +39,13 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 #  Falls du doch mal groessere Dateien brauchst, hier die Zahl erhoehen.)
 MAX_MB = 500
 app.config["MAX_CONTENT_LENGTH"] = MAX_MB * 1024 * 1024
+
+# Batch: hoechstens so viele Dateien pro Vorgang. Schuetzt vor dem
+# versehentlichen Reinziehen hunderter Dateien. Die 500-MB-Grenze oben
+# gilt bei Batch fuer die SUMME aller Dateien (Flask misst den gesamten
+# Multipart-Request und wirft 413, bevor unser Code laeuft - abgefangen
+# vom 413-Handler). Anzahl und Groesse sind damit zwei getrennte Grenzen.
+MAX_BATCH_FILES = 20
 
 # HTML-Oberflaeche liegt als separate Datei daneben
 INDEX_PATH = os.path.join(BASE_DIR, "index.html")
@@ -172,7 +181,8 @@ def too_large(_e):
     """
     return jsonify({
         "ok": False,
-        "error": f"Datei ist zu gross (Limit: {MAX_MB} MB). "
+        "error": f"Datei bzw. Dateien zusammen zu gross "
+                 f"(Limit: {MAX_MB} MB pro Vorgang). "
                  f"Erhoehe MAX_MB in app.py, falls du groessere Dateien brauchst.",
     }), 413
 
@@ -182,6 +192,64 @@ def index():
     """Liefert die Weboberflaeche aus."""
     with open(INDEX_PATH, "r", encoding="utf-8") as f:
         return Response(f.read(), mimetype="text/html")
+
+
+def _process_upload(upload, target_model):
+    """
+    Gemeinsame Kette fuer Einzel- UND Batch-Konvertierung: validiert die
+    Datei, speichert sie temporaer, schickt sie durch den BESTEHENDEN
+    Konverter (convert_file - nicht dupliziert) und schreibt bei Erfolg die
+    Ausgabedatei mit einer EIGENEN, eindeutigen download_id in OUTPUT_DIR.
+
+    Genau dieses ID-Muster (download_id = Speichername in outputs/,
+    download_name = Anzeigename) macht Vertauschung strukturell unmoeglich:
+    der Download greift immer die Datei mit ID X, nie "das letzte Ergebnis".
+
+    Gibt das reine Ergebnis-dict zurueck (KEINE HTTP-Antwort), damit beide
+    Pfade exakt dieselbe Logik nutzen. Bei Erfolg enthaelt es zusaetzlich
+    download_id + download_name; bei Fehler {"ok": False, "error": ...}.
+    """
+    filename = upload.filename or ""
+    if not filename:
+        return {"ok": False, "error": "Dateiname fehlt."}
+
+    ext = os.path.splitext(filename)[1].lower()
+    if ext not in SUPPORTED_EXTENSIONS:
+        return {
+            "ok": False,
+            "error": f"Dateityp '{ext}' nicht unterstuetzt. "
+                     f"Moeglich: {', '.join(SUPPORTED_EXTENSIONS)}",
+        }
+
+    # Upload temporaer speichern (eindeutiger Name, um Kollisionen zu vermeiden)
+    tmp_name = f"{uuid.uuid4().hex}{ext}"
+    tmp_path = os.path.join(UPLOAD_DIR, tmp_name)
+    upload.save(tmp_path)
+
+    try:
+        result = convert_file(tmp_path, target_model=target_model,
+                              original_name=filename)
+    finally:
+        # Upload sofort wieder loeschen - wir brauchen nur das Ergebnis
+        try:
+            os.remove(tmp_path)
+        except OSError:
+            pass
+
+    if not result.get("ok"):
+        return result
+
+    # Ausgabedatei mit eigener ID schreiben (fuer den Download)
+    base_no_ext = os.path.splitext(os.path.basename(filename))[0]
+    out_filename = f"{base_no_ext}{result['output_ext']}"
+    out_id = f"{uuid.uuid4().hex}{result['output_ext']}"
+    out_path = os.path.join(OUTPUT_DIR, out_id)
+    with open(out_path, "w", encoding="utf-8") as f:
+        f.write(result["output_text"])
+
+    result["download_id"] = out_id
+    result["download_name"] = out_filename
+    return result
 
 
 @app.route("/convert", methods=["POST"])
@@ -198,46 +266,12 @@ def convert():
     if not upload.filename:
         return jsonify({"ok": False, "error": "Dateiname fehlt."}), 400
 
-    ext = os.path.splitext(upload.filename)[1].lower()
-    if ext not in SUPPORTED_EXTENSIONS:
-        return jsonify({
-            "ok": False,
-            "error": f"Dateityp '{ext}' nicht unterstuetzt. "
-                     f"Moeglich: {', '.join(SUPPORTED_EXTENSIONS)}",
-        }), 400
-
     # Ziel-Modell aus dem Formular lesen (claude/gpt/gemini/none)
     target_model = request.form.get("target_model", "none").lower()
 
-    # Upload temporaer speichern (eindeutiger Name, um Kollisionen zu vermeiden)
-    tmp_name = f"{uuid.uuid4().hex}{ext}"
-    tmp_path = os.path.join(UPLOAD_DIR, tmp_name)
-    upload.save(tmp_path)
-
-    try:
-        result = convert_file(tmp_path, target_model=target_model,
-                              original_name=upload.filename)
-    finally:
-        # Upload sofort wieder loeschen - wir brauchen nur das Ergebnis
-        try:
-            os.remove(tmp_path)
-        except OSError:
-            pass
-
+    result = _process_upload(upload, target_model)
     if not result.get("ok"):
         return jsonify(result), 400
-
-    # Ausgabedatei schreiben (fuer den Download)
-    base_no_ext = os.path.splitext(upload.filename)[0]
-    out_filename = f"{base_no_ext}{result['output_ext']}"
-    out_id = f"{uuid.uuid4().hex}{result['output_ext']}"
-    out_path = os.path.join(OUTPUT_DIR, out_id)
-    with open(out_path, "w", encoding="utf-8") as f:
-        f.write(result["output_text"])
-
-    # Download-Info ins Ergebnis packen
-    result["download_id"] = out_id
-    result["download_name"] = out_filename
 
     # Vorschau kuerzen, damit das JSON nicht riesig wird
     preview = result["output_text"]
@@ -246,6 +280,168 @@ def convert():
     result["preview"] = preview
 
     return jsonify(result)
+
+
+@app.route("/convert-batch", methods=["POST"])
+def convert_batch():
+    """
+    Nimmt MEHRERE Dateien (FormData-Feld 'files') entgegen und schickt sie
+    NACHEINANDER (nicht parallel - OCR ist CPU-intensiv) durch dieselbe
+    Kette wie /convert. Jede Datei behaelt ihre eigene download_id, also ist
+    Vertauschung strukturell ausgeschlossen.
+
+    Zwei getrennte Grenzen:
+      - GROESSE: 500 MB fuer den GESAMTEN Request (Summe aller Dateien).
+        Das prueft Flask via MAX_CONTENT_LENGTH und wirft 413, bevor diese
+        Funktion ueberhaupt laeuft - der 413-Handler liefert die
+        verstaendliche Meldung.
+      - ANZAHL: max. MAX_BATCH_FILES. Das pruefen wir hier, BEVOR
+        irgendeine Datei verarbeitet wird.
+
+    Partielle Fehler brechen den Batch NICHT ab: schlaegt Datei 3 fehl,
+    laufen 4 und 5 trotzdem. Zurueck kommt pro Datei ein Ergebnis-Objekt
+    (Status 'ok' oder 'error'), jedes mit eigener ID.
+    """
+    denied = _check_origin()
+    if denied:
+        return denied
+
+    # leere Eintraege (Feld ohne Dateiname) rauswerfen
+    uploads = [u for u in request.files.getlist("files") if u and u.filename]
+    if not uploads:
+        return jsonify({"ok": False, "error": "Keine Dateien empfangen."}), 400
+    if len(uploads) > MAX_BATCH_FILES:
+        return jsonify({
+            "ok": False,
+            "error": f"Maximal {MAX_BATCH_FILES} Dateien gleichzeitig - "
+                     f"bitte in kleineren Gruppen konvertieren.",
+        }), 400
+
+    target_model = request.form.get("target_model", "none").lower()
+
+    results = []
+    for upload in uploads:
+        original_name = os.path.basename(upload.filename)
+        # id = Zeilen-ID fuer die Frontend-Liste; die eigentliche
+        # Vertausch-Sicherheit haengt an download_id (s.u.).
+        item = {
+            "id": uuid.uuid4().hex,
+            "name": original_name,
+            "format": os.path.splitext(original_name)[1].lower().lstrip("."),
+        }
+        try:
+            res = _process_upload(upload, target_model)
+        except Exception as e:
+            # Eine einzelne kaputte Datei darf den Batch NIE mitreissen.
+            item["status"] = "error"
+            item["error"] = f"Fehler beim Verarbeiten der Datei: {e}"
+            results.append(item)
+            continue
+
+        if res.get("ok"):
+            item["status"] = "ok"
+            item["download_id"] = res["download_id"]
+            item["download_name"] = res["download_name"]
+            item["target_format"] = res["target_format"]
+            item["tokens_before"] = res["tokens_before"]
+            item["tokens_after"] = res["tokens_after"]
+            item["tokens_saved"] = res["tokens_saved"]
+            item["percent_saved"] = res["percent_saved"]
+            item["token_method"] = res["token_method"]
+            item["was_ocr"] = res["was_ocr"]
+            item["target_model"] = res["target_model"]
+            item["note"] = res["note"]
+        else:
+            item["status"] = "error"
+            item["error"] = res.get("error", "Unbekannter Fehler.")
+            if res.get("error_detail"):
+                item["error_detail"] = res["error_detail"]
+        results.append(item)
+
+    return jsonify({"ok": True, "count": len(results), "results": results})
+
+
+def _unique_zip_name(name, used):
+    """Verhindert Namenskollisionen INNERHALB der ZIP: liegt 'bericht.md'
+    schon drin, wird die zweite Datei zu 'bericht (2).md', die dritte zu
+    'bericht (3).md' usw. Vergleich case-insensitiv, weil ZIPs unter Windows
+    sonst als Duplikat kollidieren. 'used' ist das Set der schon vergebenen
+    Namen (lowercase)."""
+    base, ext = os.path.splitext(name)
+    candidate = name
+    n = 2
+    while candidate.lower() in used:
+        candidate = f"{base} ({n}){ext}"
+        n += 1
+    used.add(candidate.lower())
+    return candidate
+
+
+@app.route("/download-batch", methods=["POST"])
+def download_batch():
+    """
+    Schnuert aus MEHREREN Ergebnis-Dateien EINE ZIP - komplett im
+    Arbeitsspeicher (io.BytesIO + zipfile), es bleibt KEINE Zwischendatei in
+    outputs/ liegen.
+
+    Der Client schickt die Liste der IDs (+ Anzeigenamen), die in die ZIP
+    sollen:  {"files": [{"id": "<download_id>", "name": "bericht.md"}, ...]}
+
+    VERTAUSCH- UND MANIPULATIONS-SCHUTZ (Defense in Depth):
+      - Gezogen wird ausschliesslich PER ID, nie per Reihenfolge.
+      - Der Server prueft JEDE ID serverseitig: nur eine ID, zu der WIRKLICH
+        eine Datei in OUTPUT_DIR existiert, kommt in die ZIP. Fehlgeschlagene
+        Konvertierungen schreiben NIE eine Ausgabedatei - ihre ID kann also
+        gar nicht existieren. Ein manipulierter Request mit einer error-ID
+        oder erfundenen ID laeuft damit ins Leere (Datei nicht vorhanden).
+      - os.path.basename gegen Pfad-Traversal, nur unsere .md/.csv-Endungen.
+    """
+    denied = _check_origin()
+    if denied:
+        return denied
+
+    data = request.get_json(silent=True) or {}
+    entries = data.get("files")
+    if not isinstance(entries, list) or not entries:
+        return jsonify({
+            "ok": False,
+            "error": "Keine Dateien zum Herunterladen angegeben.",
+        }), 400
+
+    buf = io.BytesIO()
+    used_names = set()
+    added = 0
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            safe_id = os.path.basename(str(entry.get("id", "")))
+            if not safe_id:
+                continue
+            # Nur unsere Ausgabe-Endungen zulassen
+            if os.path.splitext(safe_id)[1].lower() not in (".md", ".csv"):
+                continue
+            path = os.path.join(OUTPUT_DIR, safe_id)
+            # DER serverseitige ok-Status-Check: existiert die Datei wirklich?
+            # (Nur erfolgreiche Konvertierungen haben hier eine Datei liegen.)
+            if not os.path.isfile(path):
+                continue
+            display = os.path.basename(str(entry.get("name") or safe_id))
+            arcname = _unique_zip_name(display, used_names)
+            with open(path, "rb") as f:
+                zf.writestr(arcname, f.read())
+            added += 1
+
+    if added == 0:
+        return jsonify({
+            "ok": False,
+            "error": "Keine gueltigen Dateien fuer den Download gefunden "
+                     "(evtl. Server neu gestartet).",
+        }), 400
+
+    buf.seek(0)
+    return send_file(buf, mimetype="application/zip", as_attachment=True,
+                     download_name="prisma_export.zip")
 
 
 @app.route("/analyze_prompt", methods=["POST"])

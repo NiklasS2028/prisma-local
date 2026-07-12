@@ -504,6 +504,55 @@
     box-shadow: 0 -10px 18px -10px rgba(0, 0, 0, .30);
   }
 
+  /* ===== Batch-Listenansicht (mehrere Dateien) ===== */
+  .batch { display: none; }
+  .batch.show { display: block; animation: panelIn .35s ease both; }
+  .batch-head { margin-bottom: 12px; }
+  .batch-summary {
+    font-family: var(--mono); font-size: 13px; color: var(--ink-dim);
+    text-transform: uppercase; letter-spacing: .8px;
+  }
+  .batch-row {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 10px; padding: 12px 16px; margin-bottom: 8px;
+    box-shadow: var(--card-shadow);
+  }
+  .batch-row.error { border-color: var(--danger); background: var(--danger-dk); }
+  .batch-row-main {
+    display: flex; align-items: center; gap: 12px;
+    justify-content: space-between;
+  }
+  .batch-name {
+    font-size: 14px; font-weight: 600; color: var(--ink);
+    word-break: break-word; flex: 1;
+  }
+  .batch-row.error .batch-name { color: var(--danger-ink); }
+  .batch-badge {
+    font-family: var(--mono); font-size: 12px; font-weight: 700;
+    padding: 4px 10px; border-radius: 999px; white-space: nowrap;
+    border: 1px solid var(--line); color: var(--ink-dim);
+  }
+  .batch-badge.ok { color: var(--ok); border-color: rgba(var(--ok-rgb),.4); }
+  .batch-badge.error { color: var(--danger-ink); border-color: var(--danger); }
+  .batch-badge.working { color: var(--neo-b); border-color: rgba(var(--neo-b-rgb),.4); }
+  .batch-msg {
+    margin-top: 8px; font-size: 13px; color: var(--danger-ink);
+    word-break: break-word;
+  }
+  .batch-row .status-detail { margin-top: 8px; }
+  .batch-row .status-detail summary {
+    cursor: pointer; font-weight: 600; font-size: 12.5px; color: inherit;
+  }
+  .batch-row .status-detail-text {
+    margin-top: 6px; font-family: 'JetBrains Mono', monospace;
+    font-size: 12px; word-break: break-word; color: inherit;
+  }
+  .batch-hint { font-size: 12.5px; color: var(--ink-dim); align-self: center; }
+  button.primary:disabled {
+    opacity: .45; cursor: not-allowed; filter: grayscale(.3);
+    transform: none; box-shadow: none;
+  }
+
   /* ================= TAB 2: PROMPT-TRAINER ================= */
   textarea {
     width: 100%;
@@ -807,9 +856,9 @@
 
     <div class="drop" id="drop">
       <div class="drop-icon">↓</div>
-      <div class="drop-main" id="dropMain">Datei hierher ziehen oder klicken</div>
+      <div class="drop-main" id="dropMain">Dateien hierher ziehen oder klicken</div>
       <div class="drop-hint" id="dropHint">pdf · docx · xlsx · csv · txt · pptx</div>
-      <input type="file" id="fileInput" accept=".pdf,.docx,.xlsx,.xlsm,.csv,.txt,.md,.pptx">
+      <input type="file" id="fileInput" accept=".pdf,.docx,.xlsx,.xlsm,.csv,.txt,.md,.pptx" multiple>
     </div>
 
     <div class="card model-row">
@@ -855,6 +904,21 @@
         <button class="ghost open-folder-btn">Ordner öffnen</button>
         <button class="ghost" id="copyBtn">In Zwischenablage</button>
         <button class="ghost" id="convResetBtn">Neue Datei</button>
+      </div>
+    </div>
+
+    <!-- Mehrere Dateien: Listenansicht statt Ergebnisleiste (UI-Weiche in
+         routeFiles: 1 Datei -> #convResult, mehrere -> #convBatch). -->
+    <div class="batch" id="convBatch">
+      <div class="batch-head">
+        <span class="batch-summary" id="batchSummary"></span>
+      </div>
+      <div id="batchList"></div>
+      <div class="actions sticky-actions" id="batchActions">
+        <button class="primary" id="batchDownloadBtn">Alle herunterladen</button>
+        <button class="ghost open-folder-btn">Ordner öffnen</button>
+        <button class="ghost" id="batchResetBtn">Neue Dateien</button>
+        <span class="batch-hint" id="batchHint"></span>
       </div>
     </div>
   </div>
@@ -1063,7 +1127,7 @@
           sub: 'Was Prisma bisher für dich erledigt hat. Gespeichert werden ausschließlich Zahlen — keine Inhalte, keine Dateinamen.'
         }
       },
-      dropMain: "Datei hierher ziehen oder klicken",
+      dropMain: "Dateien hierher ziehen oder klicken",
       dropHint: "pdf · docx · xlsx · csv · txt · pptx",
       convModelLabel: "Für welches KI-Modell verpacken?",
       ptModelLabel: "Für welches KI-Modell?",
@@ -1079,6 +1143,18 @@
       modelBtnUniversal: "Anderes",
       converting: (name, isPdf) => `Konvertiere „${name}“${isPdf ? ' (falls Bild-PDF, läuft OCR — kann ein paar Minuten dauern)' : ''} …`,
       convResetBtn: "Neue Datei",
+      // Batch (mehrere Dateien)
+      batchConverting: (n) => `Konvertiere ${n} Dateien nacheinander … (bei Bild-PDFs läuft OCR — kann dauern)`,
+      batchSummary: (ok, total) => `${ok} von ${total} Dateien konvertiert`,
+      batchTooMany: (max) => `Maximal ${max} Dateien gleichzeitig — bitte in kleineren Gruppen konvertieren.`,
+      stWorking: "wird konvertiert …",
+      stDone: "fertig",
+      stError: "Fehler",
+      batchDownloadBtn: "Alle herunterladen",
+      batchDownloadOne: "Datei herunterladen",
+      batchResetBtn: "Neue Dateien",
+      batchNoneOk: "Keine Datei erfolgreich konvertiert — nichts zum Herunterladen.",
+      zipError: "⚠ Sammel-Download fehlgeschlagen.",
       connError: "⚠ Verbindung zum Server fehlgeschlagen. Läuft app.py noch?",
       unknownError: "Unbekannter Fehler.",
       techDetails: "Technische Details",
@@ -1162,7 +1238,7 @@
           sub: 'What Prisma has done for you so far. Only numbers are stored — no content, no file names.'
         }
       },
-      dropMain: "Drag a file here or click",
+      dropMain: "Drag files here or click",
       dropHint: "pdf · docx · xlsx · csv · txt · pptx",
       convModelLabel: "Wrap for which AI model?",
       ptModelLabel: "For which AI model?",
@@ -1177,6 +1253,18 @@
       modelBtnUniversal: "Other",
       converting: (name, isPdf) => `Converting “${name}”${isPdf ? ' (if it\'s an image PDF, OCR runs — may take a few minutes)' : ''} …`,
       convResetBtn: "New file",
+      // Batch (multiple files)
+      batchConverting: (n) => `Converting ${n} files one after another … (image PDFs run OCR — may take a while)`,
+      batchSummary: (ok, total) => `${ok} of ${total} files converted`,
+      batchTooMany: (max) => `At most ${max} files at once — please convert in smaller groups.`,
+      stWorking: "converting …",
+      stDone: "done",
+      stError: "error",
+      batchDownloadBtn: "Download all",
+      batchDownloadOne: "Download file",
+      batchResetBtn: "New files",
+      batchNoneOk: "No file converted successfully — nothing to download.",
+      zipError: "⚠ Batch download failed.",
       connError: "⚠ Connection to the server failed. Is app.py still running?",
       unknownError: "Unknown error.",
       techDetails: "Technical details",
@@ -1288,6 +1376,10 @@
     setText('downloadBtn', t.downloadBtn);
     setText('copyBtn', t.copyBtn);
     setText('convResetBtn', t.convResetBtn);
+    setText('batchResetBtn', t.batchResetBtn);
+    // Batch-Liste bei Sprachwechsel neu aufbauen, damit Status-Badges,
+    // Zusammenfassung und Button-Text in der neuen Sprache stehen.
+    if (convBatch && convBatch.classList.contains('show')) renderBatchList();
     // Trainer
     setHtml('ptInfo', t.ptInfo);
     document.getElementById('promptInput').placeholder = t.ptPlaceholder;
@@ -1396,6 +1488,8 @@
   const fileInput = document.getElementById('fileInput');
   const convStatus = document.getElementById('convStatus');
   const convResult = document.getElementById('convResult');
+  const convBatch = document.getElementById('convBatch');
+  const MAX_BATCH = 20;          // muss zu MAX_BATCH_FILES in app.py passen
   let lastFullText = "";
   let lastDownload = null;
   // Statistik: pro Konvertierungs-Ergebnis genau EIN Zähl-Event,
@@ -1403,26 +1497,38 @@
   let convCounted = true;        // nichts zu zählen, bis ein Ergebnis da ist
   let convStatsPayload = null;   // enthält NUR Zahlen + Format-Kategorie
   let lastFileExt = "";
+  // Batch: pro Zeile ein eigenes Objekt mit EIGENEM Zähl-Guard (counted),
+  // damit der eine ZIP-Klick jede ok-Datei genau einmal zählt.
+  let currentBatch = [];
 
   drop.addEventListener('click', () => fileInput.click());
   ['dragenter','dragover'].forEach(ev =>
     drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add('drag'); }));
   ['dragleave','drop'].forEach(ev =>
     drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove('drag'); }));
-  drop.addEventListener('drop', e => {
-    const f = e.dataTransfer.files[0];
-    if (f) handleFile(f);
-  });
-  fileInput.addEventListener('change', e => {
-    const f = e.target.files[0];
-    if (f) handleFile(f);
-  });
+  drop.addEventListener('drop', e => routeFiles(Array.from(e.dataTransfer.files)));
+  fileInput.addEventListener('change', e => routeFiles(Array.from(e.target.files)));
+
+  // UI-Weiche: genau EINE Datei -> gewohnte Ergebnisleiste (#convResult).
+  // MEHRERE Dateien -> neue Listenansicht (#convBatch). Sauber getrennt,
+  // nie beide gleichzeitig sichtbar.
+  function routeFiles(files) {
+    if (!files.length) return;
+    if (files.length === 1) {
+      convBatch.classList.remove('show');
+      handleFile(files[0]);
+    } else {
+      convResult.classList.remove('show');
+      handleBatch(files);
+    }
+  }
 
   async function handleFile(file) {
     const isPdf = file.name.toLowerCase().endsWith('.pdf');
     lastFileExt = (file.name.split('.').pop() || '').toLowerCase();
     showStatus(convStatus, 'loading', T().converting(file.name, isPdf));
     convResult.classList.remove('show');
+    convBatch.classList.remove('show');
 
     const form = new FormData();
     form.append('file', file);
@@ -1531,6 +1637,7 @@
   // bekommt in renderConvResult wieder eine frische Zähl-Freigabe.
   document.getElementById('convResetBtn').addEventListener('click', () => {
     convResult.classList.remove('show');
+    convBatch.classList.remove('show');
     hideStatus(convStatus);
     fileInput.value = '';          // erlaubt auch dieselbe Datei erneut
     lastFullText = '';
@@ -1550,6 +1657,190 @@
     btn.textContent = text;
     setTimeout(() => { btn.textContent = orig; }, 1500);
   }
+
+  // ================= BATCH (mehrere Dateien) =================
+  async function handleBatch(files) {
+    hideStatus(convStatus);
+    // Client-Vorprüfung fürs Limit (der Server prüft zusätzlich, ist die
+    // maßgebliche Instanz). Spart bei zu vielen Dateien den Upload.
+    if (files.length > MAX_BATCH) {
+      convBatch.classList.remove('show');
+      showStatus(convStatus, 'error', '⚠ ' + T().batchTooMany(MAX_BATCH));
+      return;
+    }
+    // Zeilen sofort im "wird konvertiert"-Zustand zeigen (Reihenfolge = Upload).
+    currentBatch = files.map(f => ({ name: f.name, status: 'working' }));
+    renderBatchList();
+    convBatch.classList.add('show');
+    convBatch.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    showStatus(convStatus, 'loading', T().batchConverting(files.length));
+
+    const form = new FormData();
+    files.forEach(f => form.append('files', f));
+    form.append('target_model', selectedModel('convModels'));
+
+    try {
+      const res = await fetch('/convert-batch', { method: 'POST', body: form });
+      const data = await res.json();
+      if (!data.ok) {
+        convBatch.classList.remove('show');
+        showStatus(convStatus, 'error', '⚠ ' + (data.error || T().unknownError));
+        return;
+      }
+      hideStatus(convStatus);
+      // Ergebnisse per Reihenfolge zuordnen: Der Server verarbeitet die
+      // Uploads in derselben Reihenfolge und gibt sie so zurück. Jede Zeile
+      // trägt ihre EIGENE download_id (Vertausch-Sicherheit) und einen
+      // eigenen Zähl-Guard.
+      currentBatch = data.results.map(it => ({
+        id: it.id,
+        name: it.name,
+        status: it.status,                 // 'ok' | 'error'
+        download_id: it.download_id,
+        download_name: it.download_name,
+        percent_saved: it.percent_saved,
+        error: it.error,
+        error_detail: it.error_detail,
+        // Zähl-Payload: NUR Zahlen + Format-Kategorie, nie Name/Inhalt.
+        saved_tokens: Math.max(0, (it.tokens_before || 0) - (it.tokens_after || 0)),
+        format: ({ xlsm: 'xlsx', md: 'txt' }[it.format] || it.format),
+        counted: false,
+      }));
+      renderBatchList();
+    } catch (err) {
+      convBatch.classList.remove('show');
+      showStatus(convStatus, 'error', T().connError);
+    }
+  }
+
+  // Baut die Listenansicht komplett per DOM-API auf (kein innerHTML mit
+  // Server-Daten -> Dateinamen/Fehlertexte immer als textContent).
+  function renderBatchList() {
+    const t = T();
+    const list = document.getElementById('batchList');
+    list.textContent = '';
+    let okCount = 0;
+    currentBatch.forEach(row => {
+      const el = document.createElement('div');
+      el.className = 'batch-row' + (row.status === 'error' ? ' error' : '');
+
+      const main = document.createElement('div');
+      main.className = 'batch-row-main';
+      const name = document.createElement('span');
+      name.className = 'batch-name';
+      name.textContent = row.name;
+      const badge = document.createElement('span');
+      if (row.status === 'ok') {
+        okCount++;
+        badge.className = 'batch-badge ok';
+        const pct = row.percent_saved;
+        const save = (typeof pct === 'number' && pct > 0.5) ? `−${pct}% · ` : '';
+        badge.textContent = save + t.stDone;
+      } else if (row.status === 'error') {
+        badge.className = 'batch-badge error';
+        badge.textContent = t.stError;
+      } else {
+        badge.className = 'batch-badge working';
+        badge.textContent = t.stWorking;
+      }
+      main.appendChild(name);
+      main.appendChild(badge);
+      el.appendChild(main);
+
+      if (row.status === 'error' && row.error) {
+        const msg = document.createElement('div');
+        msg.className = 'batch-msg';
+        msg.textContent = row.error;
+        el.appendChild(msg);
+        // Rohe technische Meldung nur als ausklappbares Detail (wie Block H).
+        if (row.error_detail) {
+          const det = document.createElement('details');
+          det.className = 'status-detail';
+          const sum = document.createElement('summary');
+          sum.textContent = t.techDetails;
+          const txt = document.createElement('div');
+          txt.className = 'status-detail-text';
+          txt.textContent = row.error_detail;
+          det.appendChild(sum);
+          det.appendChild(txt);
+          el.appendChild(det);
+        }
+      }
+      list.appendChild(el);
+    });
+
+    // Zusammenfassung + Download-Button-Zustand
+    document.getElementById('batchSummary').textContent =
+      t.batchSummary(okCount, currentBatch.length);
+    const btn = document.getElementById('batchDownloadBtn');
+    const hint = document.getElementById('batchHint');
+    // Genau eine ok-Datei -> nackte Einzeldatei (Projektprinzip: nie ZIP
+    // mit nur einer Datei). Mehrere -> ZIP.
+    btn.textContent = okCount === 1 ? t.batchDownloadOne : t.batchDownloadBtn;
+    btn.disabled = okCount === 0;
+    hint.textContent = okCount === 0 ? t.batchNoneOk : '';
+  }
+
+  document.getElementById('batchDownloadBtn').addEventListener('click', () => {
+    const okRows = currentBatch.filter(r => r.status === 'ok');
+    if (!okRows.length) return;
+    if (okRows.length === 1) {
+      // nackte Einzeldatei über den bestehenden, unveränderten Download
+      const r = okRows[0];
+      window.location.href =
+        `/download/${r.download_id}?name=${encodeURIComponent(r.download_name)}`;
+    } else {
+      downloadZip(okRows);
+    }
+    // STATISTIK: pro ok-Zeile genau EINMAL zählen (eigener Guard je Zeile).
+    // 15 ok-Dateien -> 15 Zähl-Events, obwohl nur ein Klick.
+    okRows.forEach(countBatchRow);
+  });
+
+  async function downloadZip(okRows) {
+    // ZIP zieht per download_id; die Namen sind nur Anzeige (Server
+    // basename't sie und prüft die ID serverseitig auf Existenz).
+    const payload = { files: okRows.map(r => ({ id: r.download_id, name: r.download_name })) };
+    try {
+      const res = await fetch('/download-batch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) { showStatus(convStatus, 'error', T().zipError); return; }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'prisma_export.zip';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+    } catch (e) {
+      showStatus(convStatus, 'error', T().connError);
+    }
+  }
+
+  // Zähl-Event pro Batch-Zeile: genau einmal, danach Guard zu.
+  function countBatchRow(row) {
+    if (row.counted) return;
+    row.counted = true;
+    fetch('/stats/count_file', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ saved_tokens: row.saved_tokens, format: row.format }),
+    }).catch(() => {});
+  }
+
+  document.getElementById('batchResetBtn').addEventListener('click', () => {
+    convBatch.classList.remove('show');
+    hideStatus(convStatus);
+    fileInput.value = '';
+    currentBatch = [];
+    document.getElementById('batchList').textContent = '';
+    drop.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  });
 
   // ================= TAB 2: PROMPT-TRAINER =================
   const ptStatus = document.getElementById('ptStatus');
