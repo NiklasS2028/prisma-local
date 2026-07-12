@@ -355,6 +355,11 @@
   }
   @keyframes shimmer { from { transform: translateX(-120%); } to { transform: translateX(320%); } }
   .status.error { background: var(--danger-dk); border: 1px solid var(--danger); color: var(--danger-ink); }
+  /* Ausklappbare technische Details unter einer Fehlermeldung (Block H):
+     Farben erben vom Fehler-Status (Theme-Variablen, keine Literale). */
+  .status .status-detail { margin-top: 8px; }
+  .status .status-detail summary { cursor: pointer; font-weight: 600; font-size: 12.5px; color: inherit; }
+  .status .status-detail-text { margin-top: 6px; font-family: 'JetBrains Mono', monospace; font-size: 12px; word-break: break-word; color: inherit; }
 
   /* Info-Box: zeigt das hinweis-Feld der Analyse (z.B. bei fast-leerem Prompt) */
   .info-box {
@@ -1076,6 +1081,7 @@
       convResetBtn: "Neue Datei",
       connError: "⚠ Verbindung zum Server fehlgeschlagen. Läuft app.py noch?",
       unknownError: "Unbekannter Fehler.",
+      techDetails: "Technische Details",
       analyzeError: "Fehler bei der Analyse.",
       pctLess: "weniger Tokens als die Rohdatei",
       pctMore: "Datei war schon sauber — Struktur kostet minimal extra",
@@ -1173,6 +1179,7 @@
       convResetBtn: "New file",
       connError: "⚠ Connection to the server failed. Is app.py still running?",
       unknownError: "Unknown error.",
+      techDetails: "Technical details",
       analyzeError: "Error during analysis.",
       pctLess: "fewer tokens than the raw file",
       pctMore: "file was already clean — structure costs a tiny bit extra",
@@ -1424,14 +1431,32 @@
     try {
       const res = await fetch('/convert', { method: 'POST', body: form });
       const data = await res.json();
-      if (!data.ok) { showStatus(convStatus, 'error', '⚠ ' + (data.error || T().unknownError)); return; }
+      if (!data.ok) { showStatus(convStatus, 'error', '⚠ ' + (data.error || T().unknownError), data.error_detail); return; }
       renderConvResult(data);
     } catch (err) {
       showStatus(convStatus, 'error', T().connError);
     }
   }
 
-  function showStatus(el, kind, msg) { el.className = 'status show ' + kind; el.textContent = msg; }
+  function showStatus(el, kind, msg, detail) {
+    el.className = 'status show ' + kind;
+    el.textContent = msg;
+    // Optionale rohe technische Meldung: nur als ausklappbare Detail-Zeile,
+    // nie als Hauptfehler. Aufbau per DOM-API + textContent (kein innerHTML
+    // mit Server-Daten).
+    if (detail) {
+      const det = document.createElement('details');
+      det.className = 'status-detail';
+      const sum = document.createElement('summary');
+      sum.textContent = T().techDetails;
+      const txt = document.createElement('div');
+      txt.className = 'status-detail-text';
+      txt.textContent = detail;
+      det.appendChild(sum);
+      det.appendChild(txt);
+      el.appendChild(det);
+    }
+  }
   function hideStatus(el) { el.className = 'status'; }
 
   function renderConvResult(d) {
