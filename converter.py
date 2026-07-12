@@ -353,10 +353,14 @@ def extract_pdf(path: str) -> dict:
                     all_tables.append(data)
             # Begleittext ausserhalb der Tabellen-Bereiche merken, damit der
             # CSV-Zweig ihn nicht stillschweigend verwirft.
+            # strict=False: reale PDFs enthalten Tabellen, deren Box durch
+            # Rundungsartefakte um Bruchteile eines Punkts ueber den
+            # Seitenrand ragt - pdfplumber (0.11.x) wirft dann per Default
+            # ValueError statt still zu beschneiden.
             if tables_on_page:
                 region = page
                 for t in tables_on_page:
-                    region = region.outside_bbox(t.bbox)
+                    region = region.outside_bbox(t.bbox, strict=False)
                 extra_texts.append(region.extract_text() or "")
             else:
                 extra_texts.append(txt)
