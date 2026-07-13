@@ -2,10 +2,14 @@
 
 🌐 **English** · [Deutsch](README.de.md)
 
+Local-first document converter with OCR, a rule-based prompt trainer, and usage statistics — everything runs on your machine, no file ever leaves your PC.
+
 ![License: MIT](https://img.shields.io/badge/license-MIT-blue)
 ![Python 3.12](https://img.shields.io/badge/python-3.12-blue)
 ![Tests: 136 passing](https://img.shields.io/badge/tests-136%20passing-brightgreen)
 ![100% local](https://img.shields.io/badge/privacy-100%25%20local-blueviolet)
+
+Built with: Python 3.12 · Flask · Tesseract OCR · pytest · Playwright
 
 Prisma is a local browser UI with three tools for working with AI models: a **file converter** that turns PDF, Word, Excel, CSV, TXT and PowerPoint into token-efficient formats, a **prompt trainer** that rates the structure of your prompts with transparent rules and helps you learn, and a **statistics** tab that shows your savings. **Everything runs entirely on your machine** — there is not a single external connection; no file and no prompt ever leaves your PC. A dedicated test (`tests/test_privacy.py`) proves this on every test run.
 
@@ -16,6 +20,10 @@ Prisma is a local browser UI with three tools for working with AI models: a **fi
 | Prompt Trainer | Statistics |
 |---|---|
 | ![Prompt Trainer](docs/trainer-hell.png) | ![Statistics](docs/statistik-hell.png) |
+
+Why I built this
+
+Feeding documents into AI models usually means uploading them to someone else's cloud — a non-starter for internal, client or otherwise sensitive files. Prisma solves that by doing the whole conversion pipeline locally, with the "no data leaves the machine" promise enforced by an automated test rather than just claimed. The prompt trainer takes the same transparent-by-design stance: it uses explicit rules, not a black-box AI, so you can actually see why a prompt scores the way it does and learn from it.
 
 ## What the tools do
 
