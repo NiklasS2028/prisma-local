@@ -30,5 +30,13 @@ tests/screenshots/
 prisma_*.md
 Arbeitsanweisung*.txt
 
+# Interner Ordner fuer Anleitungen und Berichte (lokal, nicht Teil des Produkts)
+_intern/
+
+# PyInstaller Build-Artefakte (gehoeren nicht ins Repo)
+build/
+dist/
+*.spec
+
 # Temporaere Dateien
 *.tmp

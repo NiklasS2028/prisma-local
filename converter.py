@@ -17,6 +17,7 @@ sie auch einzeln in anderen Projekten wiederverwenden kannst.
 
 import io
 import os
+import sys
 import csv
 import re
 import glob
@@ -28,8 +29,27 @@ import glob
 # Damit OCR trotzdem laeuft, suchen wir sie an den ueblichen Installationsorten.
 # So muss der Nutzer am PATH nichts aendern.
 
+def _frozen_base():
+    """Basisordner der gebuendelten Ressourcen im EINGEFRORENEN Zustand.
+    onedir/onefile: sys._MEIPASS (setzt PyInstaller), sonst der Ordner der .exe.
+    Gibt None zurueck, wenn NICHT eingefroren (dann bleibt die alte Logik aktiv).
+    Feste Bundle-Struktur (muss mit der .spec uebereinstimmen):
+      ocr/tesseract/tesseract.exe  |  ocr/poppler/bin/  |  ocr/tessdata/"""
+    if getattr(sys, "frozen", False):
+        return getattr(sys, "_MEIPASS", os.path.dirname(sys.executable))
+    return None
+
+
 def _find_tesseract():
-    """Sucht die tesseract.exe an den ueblichen Windows-Orten. None falls nicht da."""
+    """Sucht die tesseract.exe. None falls nicht da."""
+    # Eingefroren: NUR den gebuendelten Ort nehmen. So faellt ein Bundling-Fehler
+    # sofort auf (kein stilles Ausweichen auf eine Maschinen-Installation) und
+    # auf Fremdrechnern gibt es die Maschinenpfade ohnehin nicht.
+    base = _frozen_base()
+    if base is not None:
+        bundled = os.path.join(base, "ocr", "tesseract", "tesseract.exe")
+        return bundled if os.path.isfile(bundled) else None
+    # Normalbetrieb (python app.py): unveraendert die ueblichen Windows-Orte.
     candidates = [
         r"C:\Program Files\Tesseract-OCR\tesseract.exe",
         r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe",
@@ -44,7 +64,14 @@ def _find_tesseract():
 
 def _find_poppler_bin():
     """Sucht den poppler 'bin'-Ordner (mit pdftoppm.exe). None falls nicht da."""
-    # Typische Installationsmuster von winget/manuell. '*' faengt die Version.
+    # Eingefroren: NUR den gebuendelten bin-Ordner (siehe _find_tesseract).
+    base = _frozen_base()
+    if base is not None:
+        bundled = os.path.join(base, "ocr", "poppler", "bin")
+        if os.path.isfile(os.path.join(bundled, "pdftoppm.exe")):
+            return bundled
+        return None
+    # Normalbetrieb: unveraendert. Typische winget/manuelle Muster, '*' = Version.
     patterns = [
         r"C:\Program Files\poppler*\Library\bin",
         r"C:\Program Files\poppler*\bin",
@@ -65,6 +92,16 @@ def _find_poppler_bin():
 # Einmal beim Import ermitteln
 _TESSERACT_PATH = _find_tesseract()
 _POPPLER_PATH = _find_poppler_bin()
+
+# Eingefroren: das gebuendelte tessdata (deu+eng+osd) aktiv setzen, damit
+# lang="deu+eng" (unten) das deutsche Modell wirklich findet. Im Normalbetrieb
+# NICHT setzen - dort findet Tesseract sein eigenes tessdata neben der
+# Installation selbst, und wir wollen den bisherigen Betrieb nicht veraendern.
+_FROZEN_BASE = _frozen_base()
+if _FROZEN_BASE is not None:
+    _bundled_tessdata = os.path.join(_FROZEN_BASE, "ocr", "tessdata")
+    if os.path.isdir(_bundled_tessdata):
+        os.environ["TESSDATA_PREFIX"] = _bundled_tessdata
 
 
 # ---------------------------------------------------------------------------
