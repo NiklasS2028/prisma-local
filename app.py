@@ -14,23 +14,57 @@ Start:  python app.py
 
 import io
 import os
+import sys
 import json
 import uuid
 import zipfile
 import tempfile
 import threading
+import webbrowser
 
 from flask import Flask, request, jsonify, send_file, Response
 
 from converter import convert_file, SUPPORTED_EXTENSIONS
 from prompt_trainer import analyze_prompt
 
+# ---------------------------------------------------------------------------
+# FROZEN-TAUGLICHE PFADE (.exe vs. python app.py)
+# ---------------------------------------------------------------------------
+# PyInstaller setzt zur Laufzeit sys.frozen = True und legt den Pfad der
+# laufenden .exe in sys.executable ab. Zwei Faelle sind zu trennen:
+#   - Normalbetrieb (python app.py): alles __file__-basiert wie bisher.
+#   - Eingefroren (.exe): NUR-LESBARE Ressourcen (index.html, static/) kommen
+#     aus dem Bundle-Ort, SCHREIBBARE Daten (outputs/, stats.json) liegen
+#     NEBEN der .exe, damit sie das Schliessen ueberleben.
+# Wichtig: Im Normalbetrieb liefern beide Helfer denselben Pfad wie das
+# fruehere BASE_DIR - also null Verhaltensaenderung ohne .exe.
+
+_APP_FILE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
+def resource_dir():
+    """Ort der gebuendelten NUR-LESBAREN Ressourcen (index.html, static/).
+    Normal: der Ordner dieser Datei. Eingefroren onedir: der Ordner der .exe.
+    Eingefroren onefile: der Temp-Entpackordner (sys._MEIPASS)."""
+    if getattr(sys, "frozen", False):
+        return getattr(sys, "_MEIPASS", os.path.dirname(sys.executable))
+    return _APP_FILE_DIR
+
+
+def writable_dir():
+    """Ort fuer SCHREIBBARE, persistente Daten (outputs/, stats.json, uploads/).
+    Normal: der Ordner dieser Datei. Eingefroren: NEBEN der .exe (NICHT der
+    Temp-Ordner - sonst waeren Statistik und Ausgaben nach dem Schliessen weg)."""
+    if getattr(sys, "frozen", False):
+        return os.path.dirname(sys.executable)
+    return _APP_FILE_DIR
+
+
 app = Flask(__name__)
 
-# Ordner fuer temporaere Uploads und fertige Ausgaben
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-UPLOAD_DIR = os.path.join(BASE_DIR, "uploads")
-OUTPUT_DIR = os.path.join(BASE_DIR, "outputs")
+# Ordner fuer temporaere Uploads und fertige Ausgaben (schreibbar, persistent)
+UPLOAD_DIR = os.path.join(writable_dir(), "uploads")
+OUTPUT_DIR = os.path.join(writable_dir(), "outputs")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
@@ -47,8 +81,8 @@ app.config["MAX_CONTENT_LENGTH"] = MAX_MB * 1024 * 1024
 # vom 413-Handler). Anzahl und Groesse sind damit zwei getrennte Grenzen.
 MAX_BATCH_FILES = 20
 
-# HTML-Oberflaeche liegt als separate Datei daneben
-INDEX_PATH = os.path.join(BASE_DIR, "index.html")
+# HTML-Oberflaeche liegt als separate Datei daneben (nur lesend -> resource_dir)
+INDEX_PATH = os.path.join(resource_dir(), "index.html")
 
 # ---------------------------------------------------------------------------
 # LOKALE STATISTIK (stats.json)
@@ -58,7 +92,7 @@ INDEX_PATH = os.path.join(BASE_DIR, "index.html")
 # Bezug zu konkreten Aktionen. Das Versprechen "nichts verlaesst den PC,
 # nichts wird inhaltlich protokolliert" haengt an dieser Regel.
 
-STATS_PATH = os.path.join(BASE_DIR, "stats.json")
+STATS_PATH = os.path.join(writable_dir(), "stats.json")
 _STATS_LOCK = threading.Lock()
 
 _DEFAULT_STATS = {
@@ -613,5 +647,18 @@ if __name__ == "__main__":
     print(f"  Max. Dateigroesse:  {MAX_MB} MB")
     print("  Beenden mit:        Strg + C")
     print("=" * 60)
+
+    # Browser-Autostart NUR im eingefrorenen (.exe-)Zustand: dort gibt es
+    # keine start.bat mehr. Im normalen "python app.py"-Betrieb bleibt der
+    # Autostart bei start.bat, sonst ginge der Browser doppelt auf.
+    if getattr(sys, "frozen", False):
+        def _open_browser():
+            try:
+                webbrowser.open(f"http://localhost:{port}")
+            except Exception:
+                pass  # kein Browser gesetzt o.ae. - Server laeuft trotzdem
+        # app.run blockiert, daher zeitversetzt in einem Daemon-Thread starten
+        threading.Timer(1.5, _open_browser).start()
+
     # host=127.0.0.1 -> nur lokal erreichbar, nichts geht ins Netz
     app.run(host="127.0.0.1", port=port, debug=False)
