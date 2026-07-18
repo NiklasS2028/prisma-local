@@ -279,6 +279,11 @@ D_LINES = [
 SOLL_D = list(D_LINES)  # unveraendert, zeilenweise
 
 
+class FixtureSkipped(Exception):
+    """Fixture kann auf dieser Maschine nicht gebaut werden. Die Meldung
+    erklaert den Grund; der Runner ueberspringt statt kryptisch zu scheitern."""
+
+
 def _bullet_font():
     """Das Bullet '•' liegt bei den eingebauten Type1-Fonts auf Code 127
     der reportlab-WinAnsi-Variante - pdfminer dekodiert das zu '(cid:127)'.
@@ -286,15 +291,19 @@ def _bullet_font():
     Bullet sauber als '•' wieder heraus (so erzeugen es echte PDFs auch)."""
     from reportlab.pdfbase import pdfmetrics
     from reportlab.pdfbase.ttfonts import TTFont
+    tried = []
     for name, fname in (("FixtureArial", r"C:\Windows\Fonts\arial.ttf"),
                         ("FixtureSegoe", r"C:\Windows\Fonts\segoeui.ttf")):
+        tried.append(fname)
         if os.path.isfile(fname):
             try:
                 pdfmetrics.registerFont(TTFont(name, fname))
                 return name
             except Exception:
                 continue
-    raise RuntimeError("Kein TTF-Font fuer das Listen-Fixture gefunden")
+    raise FixtureSkipped(
+        "Fixture d (Liste) uebersprungen: kein TTF-Font fuer das "
+        "Bullet-Zeichen gefunden (gesucht: " + ", ".join(tried) + ").")
 
 
 def build_liste_pdf(path):
@@ -391,10 +400,16 @@ ALL_FIXTURES = [
 
 
 def _build_all():
+    """Baut alle Fixtures. Nicht baubare (fehlender Font) werden mit klarer
+    Meldung uebersprungen statt die Suite zu reissen."""
     built = []
     for key, fname, builder, soll in ALL_FIXTURES:
         path = os.path.join(FIXTURES, fname)
-        builder(path)
+        try:
+            builder(path)
+        except FixtureSkipped as e:
+            print(f"        SKIP {key}: {e}")
+            continue
         built.append((key, path, soll))
     return built
 
@@ -430,6 +445,143 @@ def test_c1_fixtures_convert_ok():
 
 
 # ---------------------------------------------------------------------------
+# C2 FUNDAMENT: ZEILEN-RECORDS SIND ZEILENIDENTISCH MIT extract_text()
+# ---------------------------------------------------------------------------
+# Auf diesem Assert ruht der gesamte Annotations-Ansatz: die Strukturlogik
+# arbeitet auf extract_text_lines()-Zeilen, raw_text (Messbasis) kommt aus
+# extract_text(). Nur wenn beide zeilenidentisch sind, ist die Annotation
+# eine 1:1-Anreicherung und kein zweiter Extraktionspfad.
+
+def _consistency_corpus():
+    """Alle Struktur-Fixtures + kapitel.pdf + optionale echte PDFs
+    (newmont*), plus alle weiteren bereits erzeugten Fixture-PDFs."""
+    import glob
+    paths = [p for _, p, _ in _build_all()]
+    from test_block1 import build_chapter_pdf
+    kapitel = os.path.join(FIXTURES, "kapitel.pdf")
+    build_chapter_pdf(kapitel)
+    paths.append(kapitel)
+    for pattern in ("newmont*.pdf", "Newmont*.pdf"):
+        paths.extend(glob.glob(os.path.join(FIXTURES, pattern)))
+    for extra in glob.glob(os.path.join(FIXTURES, "*.pdf")):
+        if extra not in paths:
+            paths.append(extra)
+    return paths
+
+
+def test_c2_line_records_match_extract_text():
+    import pdfplumber
+    for path in _consistency_corpus():
+        with pdfplumber.open(path) as pdf:
+            for page_no, page in enumerate(pdf.pages, start=1):
+                try:
+                    txt = page.extract_text() or ""
+                    joined = "\n".join(
+                        l["text"] for l in page.extract_text_lines())
+                except Exception:
+                    # kaputte Seiten sind Sache von Suite 11, nicht dieses
+                    # Konsistenz-Tests
+                    continue
+                assert joined == txt, (
+                    f"FUNDAMENT GEBROCHEN: {os.path.basename(path)} Seite "
+                    f"{page_no}: extract_text_lines() weicht von "
+                    f"extract_text() ab")
+
+
+# ---------------------------------------------------------------------------
+# C2: UEBERSCHRIFTEN (konservativ) - konkrete Zeilen, nicht "enthaelt ein #"
+# ---------------------------------------------------------------------------
+
+def _convert_fixture(fname_key):
+    for key, fname, builder, _soll in ALL_FIXTURES:
+        if key == fname_key:
+            path = os.path.join(FIXTURES, fname)
+            builder(path)
+            r = convert_file(path)
+            assert r["ok"], f"{key}: {r.get('error')}"
+            return r
+    raise AssertionError(f"unbekanntes Fixture {fname_key}")
+
+
+def test_c2_misch_headings_exact():
+    """Fixture e: Titel wird #, beide Abschnitte werden ## - und sonst
+    NICHTS. Reihenfolge bleibt."""
+    r = _convert_fixture("e_misch")
+    lines = r["output_text"].split("\n")
+    assert "# Jahresbericht der Beispiel GmbH" in lines, lines
+    assert "## Wirtschaftliche Entwicklung" in lines, lines
+    assert "## Kennzahlen und Ausblick" in lines, lines
+    headings = [l for l in lines if l.startswith("#")]
+    assert headings == ["# Jahresbericht der Beispiel GmbH",
+                        "## Wirtschaftliche Entwicklung",
+                        "## Kennzahlen und Ausblick"], \
+        f"Falsche oder zusaetzliche Headings: {headings}"
+    assert (lines.index("# Jahresbericht der Beispiel GmbH")
+            < lines.index("## Wirtschaftliche Entwicklung")
+            < lines.index("## Kennzahlen und Ausblick")), \
+        "Heading-Reihenfolge entspricht nicht dem Dokument"
+
+
+def test_c2_bold_word_in_body_never_heading():
+    """Die selbst gefundene Falle: 'deutlich' ist fett IM Fliesstext.
+    Die Zeile muss unveraendert und ohne #-Praefix im Output stehen."""
+    r = _convert_fixture("e_misch")
+    lines = r["output_text"].split("\n")
+    body_line = ("Das abgelaufene Geschaeftsjahr brachte der Gesellschaft "
+                 "ein deutlich")
+    assert body_line in lines, \
+        f"Fliesstext-Zeile mit fettem Wort fehlt oder wurde veraendert"
+    for h in (l for l in lines if l.startswith("#")):
+        assert E_BOLD_WORD not in h, \
+            f"Fettes Wort im Fliesstext wurde zum Heading: {h}"
+
+
+def test_c2_plain_fixtures_byte_identical():
+    """Fixtures a-d: exakt NULL Headings, Output byteidentisch zur
+    C1-Baseline (die Heading-Logik fasst diese Dokumente nicht an)."""
+    expected = {
+        "a_blocksatz": "\n".join(A_PAR1 + A_PAR2),
+        "b_flatter": "\n".join(B_PAR1 + B_PAR2),
+        "c_adresse": "\n".join(C_INTRO + C_ADDRESS + C_CLOSE),
+        "d_liste": "\n".join(D_LINES),
+    }
+    for key, want in expected.items():
+        try:
+            r = _convert_fixture(key)
+        except FixtureSkipped as e:
+            print(f"        SKIP {key}: {e}")
+            continue
+        assert r["output_text"] == want, (
+            f"{key}: Output weicht von der C1-Baseline ab:\n"
+            f"---IST---\n{r['output_text']}\n---SOLL---\n{want}")
+
+
+def test_c2_kapitel_headings_and_stripping_intact():
+    """Echte Mehrseiten-PDF (kapitel.pdf): 'Kapitel 1'-'Kapitel 5' werden
+    genau EINE Ebene (#), Kopf-/Fusszeilen-Entfernung arbeitet unveraendert,
+    die Zeile in der Seitenmitte bleibt Fliesstext."""
+    from test_block1 import build_chapter_pdf
+    path = os.path.join(FIXTURES, "kapitel.pdf")
+    build_chapter_pdf(path)
+    r = convert_file(path)
+    assert r["ok"], r.get("error")
+    lines = r["output_text"].split("\n")
+    for n in range(1, 6):
+        assert f"# Kapitel {n}" in lines, \
+            f"'# Kapitel {n}' fehlt als exakte Zeile"
+    headings = [l for l in lines if l.startswith("#")]
+    assert len(headings) == 5, f"Zusaetzliche Headings erkannt: {headings}"
+    assert "Interner Vermerk 99" in lines, \
+        "Zeile in Seitenmitte fehlt oder wurde veraendert"
+    assert "Vertraulich - Beispiel GmbH" not in r["output_text"], \
+        "Kopfzeile wurde nach der Stripper-Anpassung nicht mehr entfernt"
+    assert "Seite 1 von 5" not in r["output_text"], \
+        "Fusszeile wurde nach der Stripper-Anpassung nicht mehr entfernt"
+    assert "10 wiederkehrende" in r["note"], \
+        f"Stripper-Note veraendert: {r['note']}"
+
+
+# ---------------------------------------------------------------------------
 # BASELINE-MODUS (C1-Ist-Aufnahme): Output + Token-Zahlen aller Fixtures
 # ---------------------------------------------------------------------------
 
@@ -461,6 +613,11 @@ def print_baseline():
 
 ALL_TESTS = [
     test_c1_fixtures_convert_ok,
+    test_c2_line_records_match_extract_text,   # Fundament zuerst
+    test_c2_misch_headings_exact,
+    test_c2_bold_word_in_body_never_heading,
+    test_c2_plain_fixtures_byte_identical,
+    test_c2_kapitel_headings_and_stripping_intact,
 ]
 
 if __name__ == "__main__":

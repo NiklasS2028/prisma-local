@@ -205,7 +205,7 @@ def _removed_note(removed_lines, max_show=4):
     return f" Entfernt: {shown}{more}."
 
 
-def _strip_repeating_headers_footers(pages_lines):
+def _strip_repeating_headers_footers(pages_lines, key=None):
     """
     Entfernt Zeilen, die auf vielen Seiten identisch wiederkehren
     (typische Kopf-/Fusszeilen wie 'Seite X', Firmennamen, Copyright).
@@ -219,28 +219,35 @@ def _strip_repeating_headers_footers(pages_lines):
         damit 'Seite 1'/'Seite 2' als ein Muster gelten - laengere Zeilen
         muessen exakt uebereinstimmen.
 
-    pages_lines: Liste von Seiten, jede Seite eine Liste von Zeilen.
-    Rueckgabe: (bereinigter_text, anzahl_entfernter_zeilen, entfernte_muster)
+    pages_lines: Liste von Seiten, jede Seite eine Liste von Zeilen-Items.
+    key: optionaler Accessor Item -> Zeilentext. Ohne key ist das Item
+         selbst der Text (bisheriges Verhalten). Mit key koennen Zeilen-
+         Records (Text + Geometrie, Block C) gefiltert werden, ohne dass
+         die Wiederholungs-Logik davon etwas merkt.
+    Rueckgabe: (bereinigte_seiten, anzahl_entfernter_zeilen, entfernte_muster)
+    - bereinigte_seiten hat dieselbe Form wie die Eingabe.
     """
     from collections import Counter
+
+    if key is None:
+        key = lambda line: line
 
     n_pages = len(pages_lines)
     if n_pages < 2:
         # Bei 1 Seite gibt es keine "Wiederholung" -> nichts entfernen
-        flat = "\n".join("\n".join(p) for p in pages_lines)
-        return flat, 0, []
+        return pages_lines, 0, []
 
     EDGE = 2            # nur die aeussersten 2 Zeilen oben/unten pruefen
     MAX_HEADER_LEN = 80  # laengere Zeilen sind sicher Inhalt
 
-    def normalize(line):
-        s = line.strip()
+    def normalize(text):
+        s = text.strip()
         if len(s) <= 40:
             return re.sub(r"\d+", "#", s)
         return s
 
-    def is_candidate(idx, page_len, line):
-        s = line.strip()
+    def is_candidate(idx, page_len, text):
+        s = text.strip()
         if not s or len(s) > MAX_HEADER_LEN:
             return False
         if _PROTECTED.match(s):
@@ -253,9 +260,9 @@ def _strip_repeating_headers_footers(pages_lines):
         # innerhalb einer Seite mit)
         seen = set()
         for idx, line in enumerate(page):
-            if not is_candidate(idx, len(page), line):
+            if not is_candidate(idx, len(page), key(line)):
                 continue
-            norm = normalize(line)
+            norm = normalize(key(line))
             if norm and norm not in seen:
                 seen.add(norm)
                 counter[norm] += 1
@@ -271,17 +278,169 @@ def _strip_repeating_headers_footers(pages_lines):
     for page in pages_lines:
         kept = []
         for idx, line in enumerate(page):
-            if is_candidate(idx, len(page), line) and normalize(line) in junk_patterns:
+            text = key(line)
+            if is_candidate(idx, len(page), text) and normalize(text) in junk_patterns:
                 removed += 1
-                stripped = line.strip()
+                stripped = text.strip()
                 if stripped not in removed_lines:
                     removed_lines.append(stripped)
                 continue
             kept.append(line)
         cleaned_pages.append(kept)
 
-    flat = "\n".join("\n".join(p) for p in cleaned_pages)
-    return flat, removed, removed_lines
+    return cleaned_pages, removed, removed_lines
+
+
+# ---------------------------------------------------------------------------
+# PDF-STRUKTUR (Block C): ZEILEN-RECORDS UND UEBERSCHRIFTEN
+# ---------------------------------------------------------------------------
+# Grundidee: pdfplumber liefert ueber extract_text_lines() dieselben Zeilen
+# wie extract_text(), aber MIT Geometrie (x0/x1/top) und Zeichendaten
+# (Schriftgroesse, Fontname). Die Strukturlogik arbeitet auf diesen
+# annotierten Zeilen; raw_text (Messbasis "vorher") bleibt unveraendert der
+# nackte extract_text()-Join.
+
+# Ueberschriften-Erkennung: KONSERVATIV. Ein falsches Heading ist schlimmer
+# als keins - deshalb muessen ALLE Signale gleichzeitig zustimmen.
+_HEADING_SIZE_FACTOR = 1.2   # Zeilengroesse >= 1.2x Fliesstext-Median
+_HEADING_BOLD_MIN = 0.6      # Mehrheit der Zeichen der ZEILE fett
+_HEADING_WIDTH_MAX = 0.85    # Zeile deutlich schmaler als der Satzspiegel
+_HEADING_MAX_CHARS = 100     # laengere Zeilen sind sicher Fliesstext
+_HEADING_SIZE_CLUSTER = 0.5  # pt-Toleranz: Groessen in einem Cluster = eine Ebene
+
+
+def _line_records(page, expected_text):
+    """Zeilen einer Seite als Records mit Geometrie- und Font-Daten.
+
+    Sicherheitsanker des ganzen Ansatzes: Ergeben die Zeilen NICHT exakt
+    den extract_text()-Text, geben wir None zurueck - die Seite laeuft dann
+    wie bisher als nackte Textzeilen (kein Inhaltsrisiko, nur keine
+    Struktur-Extras). Suite 13 beweist die Gleichheit fuer den Testkorpus.
+    """
+    try:
+        lines = page.extract_text_lines(return_chars=True)
+    except Exception:
+        return None
+    if "\n".join(l["text"] for l in lines) != expected_text:
+        return None
+    recs = []
+    for l in lines:
+        chars = l.get("chars") or []
+        sizes = sorted(round(c.get("size", 0.0), 1) for c in chars)
+        visible = [c for c in chars if (c.get("text") or "").strip()]
+        n_bold = sum(1 for c in visible
+                     if "bold" in (c.get("fontname") or "").lower())
+        recs.append({
+            "text": l["text"],
+            "x0": l["x0"], "x1": l["x1"],
+            "top": l["top"], "bottom": l["bottom"],
+            "size": sizes[len(sizes) // 2] if sizes else None,
+            "bold_ratio": (n_bold / len(visible)) if visible else 0.0,
+            "n_chars": len(visible),
+        })
+    return recs
+
+
+def _plain_records(text):
+    """Zeilen ohne Geometrie (OCR-Seiten, Fallback) im selben Record-Format."""
+    return [{"text": s} for s in text.split("\n")]
+
+
+def _mark_headings(pages_items):
+    """Markiert konservativ erkannte Ueberschriften (rec['heading'] = 1..3).
+
+    Nur Zeilen mit Geometrie kommen infrage (OCR-Seiten nie). Eine Zeile
+    wird NUR dann Heading, wenn ALLE Signale zustimmen:
+      - Schriftgroesse >= _HEADING_SIZE_FACTOR x Fliesstext-Median des
+        Dokuments (zeichengewichteter Median - der Fliesstext dominiert)
+      - Mehrheit der Zeichen der Zeile fett (Zeilenkontext! Ein fettes
+        WORT im Fliesstext kippt die Zeile nicht)
+      - Zeile deutlich schmaler als der Satzspiegel (Headings fuellen
+        keine Blocksatz-Zeile) und <= _HEADING_MAX_CHARS Zeichen
+      - endet nicht auf Satzzeichen, enthaelt mindestens einen Buchstaben
+    Ebenen: Groessencluster absteigend -> # / ## / ###. Kandidaten jenseits
+    des dritten Clusters bleiben konservativ Fliesstext.
+    Rueckgabe: Anzahl markierter Ueberschriften.
+    """
+    geo = [r for page in pages_items for r in page
+           if r.get("size") and r.get("n_chars")]
+    if not geo:
+        return 0
+
+    # Zeichengewichteter Median der Zeilengroessen = Fliesstext-Groesse
+    weighted = sorted((r["size"], r["n_chars"]) for r in geo)
+    total = sum(w for _, w in weighted)
+    acc = 0
+    body_size = weighted[-1][0]
+    for s, w in weighted:
+        acc += w
+        if acc * 2 >= total:
+            body_size = s
+            break
+
+    frame_w = max(r["x1"] for r in geo) - min(r["x0"] for r in geo)
+    if frame_w <= 0 or body_size <= 0:
+        return 0
+
+    candidates = []
+    for page in pages_items:
+        for r in page:
+            if not r.get("size") or not r.get("n_chars"):
+                continue
+            text = r["text"].strip()
+            if not text or len(text) > _HEADING_MAX_CHARS:
+                continue
+            if not any(ch.isalpha() for ch in text):
+                continue
+            if text[-1] in ".!?;:,":
+                continue
+            if r["size"] < body_size * _HEADING_SIZE_FACTOR:
+                continue
+            if r["bold_ratio"] < _HEADING_BOLD_MIN:
+                continue
+            if (r["x1"] - r["x0"]) > frame_w * _HEADING_WIDTH_MAX:
+                continue
+            candidates.append(r)
+    if not candidates:
+        return 0
+
+    # Groessencluster (0.5-pt-Toleranz) -> maximal 3 Ebenen, groesste = #
+    sizes = sorted({r["size"] for r in candidates}, reverse=True)
+    clusters = [[sizes[0]]]
+    for s in sizes[1:]:
+        if clusters[-1][-1] - s <= _HEADING_SIZE_CLUSTER:
+            clusters[-1].append(s)
+        else:
+            clusters.append([s])
+    level_of = {}
+    for level, cluster in enumerate(clusters[:3], start=1):
+        for s in cluster:
+            level_of[s] = level
+
+    n = 0
+    for r in candidates:
+        level = level_of.get(r["size"])
+        if level:
+            r["heading"] = level
+            n += 1
+    return n
+
+
+def _render_lines(pages_items):
+    """Baut aus den (ggf. Heading-markierten) Zeilen-Records die Textzeilen.
+    Headings bekommen Leerzeilen davor/dahinter (gueltiges Markdown);
+    ueberzaehlige Leerzeilen kollabiert _clean_text danach."""
+    out = []
+    for page in pages_items:
+        for r in page:
+            level = r.get("heading")
+            if level:
+                out.append("")
+                out.append("#" * level + " " + r["text"].strip())
+                out.append("")
+            else:
+                out.append(r["text"])
+    return out
 
 
 def _ocr_pages(path: str, page_numbers):
@@ -386,6 +545,7 @@ def extract_pdf(path: str) -> dict:
     import pdfplumber
 
     page_texts = []       # extrahierter Text pro Seite (Index 0 = Seite 1)
+    page_recs = []        # Zeilen-Records mit Geometrie pro Seite (oder None)
     extra_texts = []      # Text AUSSERHALB von Tabellen pro Seite (fuer CSV-Zweig)
     all_tables = []
     n_images = 0
@@ -399,6 +559,10 @@ def extract_pdf(path: str) -> dict:
             # dadurch unten wie Bildseiten behandelt (OCR-Rettung).
             try:
                 txt = page.extract_text() or ""
+                # Zeilen-Records fuer die Strukturlogik (Block C); None bei
+                # Abweichung vom extract_text()-Ergebnis -> Seite laeuft
+                # dann ohne Struktur-Extras weiter.
+                recs = _line_records(page, txt)
                 page_images = len(page.images or [])
                 tables_on_page = page.find_tables()
                 page_tables = []
@@ -424,7 +588,9 @@ def extract_pdf(path: str) -> dict:
                 if not first_error:
                     first_error = f"Seite {page_no}: {e}"
                 txt, extra, page_tables, page_images = "", "", [], 0
+                recs = None
             page_texts.append(txt)
+            page_recs.append(recs)
             extra_texts.append(extra)
             all_tables.extend(page_tables)
             n_images += page_images
@@ -508,20 +674,30 @@ def extract_pdf(path: str) -> dict:
     if image_pages and text_pages:
         ocr_texts, ocr_error = _ocr_pages(path, image_pages)
         # Seiten in ORIGINAL-Reihenfolge zusammensetzen:
-        # Textseiten direkt, Bildseiten aus der OCR.
+        # Textseiten direkt (mit Zeilen-Records fuer die Strukturlogik),
+        # Bildseiten aus der OCR (nur Text, keine Geometrie).
         assembled = []
+        pages_items = []
         for i in range(1, n_pages + 1):
             if i in ocr_texts and ocr_texts[i].strip():
                 assembled.append(ocr_texts[i])
+                pages_items.append(_plain_records(ocr_texts[i]))
             elif i in image_pages:
                 assembled.append("")  # OCR fehlgeschlagen -> Seite fehlt
+                pages_items.append(_plain_records(""))
             else:
                 assembled.append(page_texts[i - 1])
+                recs = page_recs[i - 1]
+                pages_items.append(recs if recs is not None
+                                   else _plain_records(page_texts[i - 1]))
 
-        pages_lines = [t.split("\n") for t in assembled]
-        deduped_text, removed, removed_patterns = \
-            _strip_repeating_headers_footers(pages_lines)
-        md = _clean_text(deduped_text)
+        # WICHTIG: Kopf-/Fusszeilen-Entfernung laeuft VOR der Strukturlogik
+        # (zeilenbasierte Wiederholungserkennung braucht die Originalzeilen).
+        cleaned_pages, removed, removed_patterns = \
+            _strip_repeating_headers_footers(pages_items,
+                                             key=lambda r: r["text"])
+        _mark_headings(cleaned_pages)
+        md = _clean_text("\n".join(_render_lines(cleaned_pages)))
 
         ocr_ok = [i for i in image_pages if ocr_texts.get(i, "").strip()]
         ocr_failed = [i for i in image_pages if i not in ocr_ok]
@@ -573,10 +749,13 @@ def extract_pdf(path: str) -> dict:
         }
 
     # ---- Fall 3: normale Text-PDF ----
-    pages_lines = [t.split("\n") for t in page_texts]
-    # bereinigt: wiederkehrende Kopf-/Fusszeilen raus
-    deduped_text, removed, removed_patterns = \
-        _strip_repeating_headers_footers(pages_lines)
+    pages_items = [page_recs[i] if page_recs[i] is not None
+                   else _plain_records(t)
+                   for i, t in enumerate(page_texts)]
+    # bereinigt: wiederkehrende Kopf-/Fusszeilen raus. Laeuft VOR der
+    # Strukturlogik - die Wiederholungserkennung braucht die Originalzeilen.
+    cleaned_pages, removed, removed_patterns = \
+        _strip_repeating_headers_footers(pages_items, key=lambda r: r["text"])
     # Grobe Heuristik: viele Tabellenzeilen + wenig Fliesstext -> Tabellen-PDF
     table_cells = sum(len(r) for t in all_tables for r in t)
 
@@ -601,8 +780,10 @@ def extract_pdf(path: str) -> dict:
             "note": note + image_note,
         }
 
-    # Standardfall: Fliesstext -> Markdown (kopf-/fusszeilenbereinigt)
-    md = _clean_text(deduped_text)
+    # Standardfall: Fliesstext -> Markdown (kopf-/fusszeilenbereinigt,
+    # konservativ erkannte Ueberschriften als #/##/###)
+    _mark_headings(cleaned_pages)
+    md = _clean_text("\n".join(_render_lines(cleaned_pages)))
     if removed > 0:
         note = (f"PDF-Fliesstext als Markdown bereinigt. "
                 f"{removed} wiederkehrende Kopf-/Fusszeilen entfernt."
