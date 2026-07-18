@@ -57,6 +57,8 @@ python app.py
 
 Dann **http://localhost:8770** öffnen — beenden mit `Strg + C`. Der Server läuft auf Port 8770 und bindet ausschließlich auf 127.0.0.1; er ist aus dem Netzwerk nicht erreichbar.
 
+Falls sich die Statistik einmal seltsam verhält: Prisma mit der Umgebungsvariable `PRISMA_DEBUG=1` starten — dann entsteht neben der App ein Diagnose-Log (`stats_debug.log`), das jeden Stats-Lese- und Schreibzugriff festhält.
+
 ## Wo landen die Ergebnisse?
 
 Jedes Konvertierungs-Ergebnis wird im Projektordner unter `outputs/` abgelegt — der Button **„Ordner öffnen"** (in der Ergebnisleiste und im Statistik-Tab unter „Ausgaben verwalten") führt direkt dorthin.

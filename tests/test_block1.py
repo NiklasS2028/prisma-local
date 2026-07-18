@@ -278,8 +278,47 @@ def test_pptx_notes_hint():
     out = r["output_text"]
     assert "Praesentationstitel Alpha" in out, "Folientext fehlt"
     assert "Geheime Sprechernotiz 555" in out, \
-        "Sprechernotiz fehlt im Output (markitdown-Verhalten geaendert?)"
+        "Sprechernotiz fehlt im Output (python-pptx-Extraktion geaendert?)"
     assert "Sprechernotizen" in r["note"], f"Note erwaehnt Sprechernotizen nicht: {r['note']}"
+
+
+def build_structure_pptx(path):
+    """Folien mit Bulletpoints (mehrstufig), Untertitel und Tabelle - deckt
+    den python-pptx-Ersatz von markitdown ab (Struktur statt flachem Text)."""
+    from pptx import Presentation
+    from pptx.util import Inches
+    prs = Presentation()
+    s1 = prs.slides.add_slide(prs.slide_layouts[0])
+    s1.shapes.title.text = "Titelfolie"
+    s1.placeholders[1].text = "Untertitel Gamma"
+    s2 = prs.slides.add_slide(prs.slide_layouts[1])
+    s2.shapes.title.text = "Ergebnisse"
+    body = s2.placeholders[1].text_frame
+    body.text = "Oberpunkt"
+    p = body.add_paragraph(); p.text = "Unterpunkt"; p.level = 1
+    s3 = prs.slides.add_slide(prs.slide_layouts[5])
+    s3.shapes.title.text = "Kennzahlen"
+    tbl = s3.shapes.add_table(2, 2, Inches(1), Inches(2), Inches(6), Inches(1)).table
+    tbl.cell(0, 0).text = "Kennzahl"; tbl.cell(0, 1).text = "Wert"
+    tbl.cell(1, 0).text = "Umsatz";   tbl.cell(1, 1).text = "1.2 Mio"
+    prs.save(path)
+
+
+def test_pptx_structure_preserved():
+    """python-pptx-Ersatz: Folientrenner, Bullet-Hierarchie, Pipe-Tabelle,
+    und Untertitel plain (KEINE erfundene Aufzaehlung)."""
+    path = os.path.join(FIXTURES, "struktur.pptx")
+    build_structure_pptx(path)
+    r = convert_file(path, target_model="none")
+    assert r["ok"], f"Konvertierung fehlgeschlagen: {r.get('error')}"
+    out = r["output_text"]
+    assert "## Folie 1: Titelfolie" in out, f"Folientrenner mit Titel fehlt: {out}"
+    assert "- Oberpunkt" in out, "Bullet oberster Ebene fehlt"
+    assert "  - Unterpunkt" in out, "Eingerueckte Bullet-Ebene fehlt (Hierarchie verloren)"
+    assert "| --- | --- |" in out, "Pipe-Tabelle fehlt"
+    assert "Untertitel Gamma" in out, "Untertitel fehlt"
+    assert "- Untertitel Gamma" not in out, \
+        "Untertitel faelschlich als Aufzaehlung ausgegeben"
 
 
 def test_csv_branch_keeps_companion_text():
@@ -346,6 +385,7 @@ ALL_TESTS = [
     test_d_docx_original_order,
     test_e_xlsx_formula_fallback,
     test_pptx_notes_hint,
+    test_pptx_structure_preserved,
     test_csv_branch_keeps_companion_text,
     test_image_hint_in_text_pdf,
     test_regression_plain_text_pdf,

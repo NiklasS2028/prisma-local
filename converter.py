@@ -779,29 +779,82 @@ def extract_txt(path: str) -> dict:
 
 
 def extract_pptx(path: str) -> dict:
-    """PowerPoint via MarkItDown -> Markdown."""
-    from markitdown import MarkItDown
-    md = MarkItDown()
-    result = md.convert(path)
-    text = result.text_content or ""
+    """PowerPoint via python-pptx -> strukturiertes Markdown.
+
+    Pro Folie: Titel als Trenner "## Folie N: <Titel>", Body-Text als
+    verschachtelte Liste (Ebene ueber Einrueckung), Untertitel plain (keine
+    erfundene Aufzaehlung), Tabellen als Markdown-Pipe-Tabellen,
+    Sprechernotizen unter "### Notes:".
+
+    Frueher lief das ueber markitdown. Das zog magika als schwergewichtige
+    Abhaengigkeit nach, deren ONNX-Model-Verzeichnis im eingefrorenen
+    Zustand (.exe) fehlte und PPTX zum Absturz brachte. python-pptx ist
+    ohnehin Dependency und findet den Dateityp bereits ueber die Endung.
+    """
+    from pptx import Presentation
+    from pptx.enum.shapes import PP_PLACEHOLDER
+
+    prs = Presentation(path)
+
+    def _table_md(table):
+        rows = ["| " + " | ".join(c.text.strip() for c in r.cells) + " |"
+                for r in table.rows]
+        if rows:
+            rows.insert(1, "| " + " | ".join(["---"] * len(table.columns)) + " |")
+        return "\n".join(rows)
+
+    def _is_subtitle(shape):
+        return (shape.is_placeholder
+                and shape.placeholder_format.type == PP_PLACEHOLDER.SUBTITLE)
+
+    def _body_md(shape):
+        # Untertitel plain, sonst Liste mit Einrueckung nach Absatz-Ebene
+        plain = _is_subtitle(shape)
+        lines = []
+        for para in shape.text_frame.paragraphs:
+            t = para.text.strip()
+            if not t:
+                continue
+            lines.append(t if plain else "  " * para.level + "- " + t)
+        return "\n".join(lines)
+
+    blocks = []
+    n_notes = 0
+    for i, slide in enumerate(prs.slides, 1):
+        title_shape = slide.shapes.title
+        # Titel ueber shape_id erkennen - slide.shapes.title liefert ein
+        # anderes Wrapper-Objekt als die Iteration, "is" greift nicht.
+        title_id = title_shape.shape_id if title_shape is not None else None
+        title = title_shape.text.strip() if title_shape is not None else ""
+
+        part = [f"## Folie {i}: {title}" if title else f"## Folie {i}"]
+        for shape in slide.shapes:
+            if title_id is not None and shape.shape_id == title_id:
+                continue  # Titel steckt schon im Trenner
+            if shape.has_table:
+                part.append(_table_md(shape.table))
+            elif shape.has_text_frame and shape.text_frame.text.strip():
+                body = _body_md(shape)
+                if body:
+                    part.append(body)
+
+        if slide.has_notes_slide:
+            note_text = (slide.notes_slide.notes_text_frame.text or "").strip()
+            if note_text:
+                n_notes += 1
+                part.append("### Notes:\n" + note_text)
+
+        blocks.append("\n".join(part))
+
+    text = "\n\n".join(blocks)
     cleaned = _clean_text(text)
 
     note = "PowerPoint-Folien in Markdown umgewandelt (Text pro Folie extrahiert)."
     # Fairness-Hinweis: Sprechernotizen landen mit im Output - das ist je
     # nach Datei gewollt oder ueberraschend, deshalb sagen wir es dazu.
-    try:
-        from pptx import Presentation
-        prs = Presentation(path)
-        n_notes = sum(
-            1 for slide in prs.slides
-            if slide.has_notes_slide
-            and (slide.notes_slide.notes_text_frame.text or "").strip()
-        )
-        if n_notes > 0:
-            note += (f" Hinweis: {n_notes} Folie(n) enthalten Sprechernotizen - "
-                     f"diese sind im Output mit enthalten.")
-    except Exception:
-        pass  # Hinweis ist optional - Extraktion selbst haengt nicht daran
+    if n_notes > 0:
+        note += (f" Hinweis: {n_notes} Folie(n) enthalten Sprechernotizen - "
+                 f"diese sind im Output mit enthalten.")
 
     return {
         "raw_text": text,

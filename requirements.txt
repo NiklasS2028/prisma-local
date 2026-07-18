@@ -5,8 +5,7 @@ flask           # lokaler Webserver (app.py)
 pdfplumber      # PDF-Text- und Tabellen-Extraktion
 python-docx     # Word-Dokumente
 openpyxl        # Excel-Dateien
-markitdown      # PowerPoint -> Markdown
-python-pptx     # PPTX-Sprechernotizen-Erkennung (und markitdown-Unterbau)
+python-pptx     # PowerPoint -> Markdown (Text, Listen, Tabellen, Sprechernotizen)
 tiktoken        # exakte Token-Zaehlung (optional - ohne greift die Schaetzung)
 pdf2image       # OCR-Kette: PDF-Seiten -> Bilder (braucht poppler)
 pytesseract     # OCR-Kette: Texterkennung (braucht Tesseract)

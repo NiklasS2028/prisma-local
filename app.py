@@ -19,6 +19,8 @@ import json
 import uuid
 import zipfile
 import tempfile
+import datetime
+import traceback
 import threading
 import webbrowser
 
@@ -95,6 +97,46 @@ INDEX_PATH = os.path.join(resource_dir(), "index.html")
 STATS_PATH = os.path.join(writable_dir(), "stats.json")
 _STATS_LOCK = threading.Lock()
 
+# ---------------------------------------------------------------------------
+# STATS-DIAGNOSE (Block A) - standardmaessig AUS, per Umgebungsvariable an
+# ---------------------------------------------------------------------------
+# Einschalten:  Umgebungsvariable PRISMA_DEBUG=1 setzen, dann Prisma starten
+#   PowerShell:  $env:PRISMA_DEBUG = "1"; .\Prisma.exe
+#   cmd:         set PRISMA_DEBUG=1 && Prisma.exe
+# Schreibt dann Diagnose-Zeilen sowohl in die offene Konsole als auch in eine
+# stats_debug.log NEBEN der .exe (writable_dir). Jede Zeile nennt die
+# AUFRUFENDE Funktion (_caller), damit die Reihenfolge der read-modify-write-
+# und reset-Zugriffe rekonstruierbar ist. Bleibt dauerhaft im Code: der
+# urspruengliche Stats-Bug war auf dem Fremdrechner nicht reproduzierbar -
+# taucht er bei einem Nutzer wieder auf, liefert PRISMA_DEBUG=1 sofort ein Log.
+DEBUG_STATS = os.environ.get("PRISMA_DEBUG") == "1"
+_DEBUG_LOG_PATH = os.path.join(writable_dir(), "stats_debug.log")
+
+
+def _caller():
+    """Name der Funktion, die die instrumentierte Funktion aufgerufen hat.
+    Frame 0 = _caller, Frame 1 = die instrumentierte Funktion,
+    Frame 2 = deren Aufrufer (die Route)."""
+    try:
+        return sys._getframe(2).f_code.co_name
+    except Exception:
+        return "?"
+
+
+def _dbg(msg):
+    if not DEBUG_STATS:
+        return
+    line = "[{}] {}".format(datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3], msg)
+    try:
+        print("DBG " + line, flush=True)
+    except Exception:
+        pass
+    try:
+        with open(_DEBUG_LOG_PATH, "a", encoding="utf-8") as f:
+            f.write(line + "\n")
+    except Exception:
+        pass
+
 _DEFAULT_STATS = {
     "files_converted": 0,
     "prompts_analyzed": 0,
@@ -127,12 +169,21 @@ def _load_stats():
     """Liest stats.json defensiv: fehlende/kaputte Datei oder fremde
     Schluessel fuehren NIE zum Crash - es zaehlt nur die bekannte
     Nur-Zahlen-Struktur, alles andere wird verworfen."""
+    caller = _caller()
+    try:
+        _exists = os.path.exists(STATS_PATH)
+        _size = os.path.getsize(STATS_PATH) if _exists else -1
+    except Exception:
+        _exists, _size = "?", "?"
+    _dbg("_load_stats <- {} | path={} exists={} size={}".format(
+        caller, STATS_PATH, _exists, _size))
     try:
         with open(STATS_PATH, "r", encoding="utf-8") as f:
             raw = json.load(f)
         if not isinstance(raw, dict):
             raise ValueError("stats.json ist kein Objekt")
-    except Exception:
+    except Exception as e:
+        _dbg("_load_stats READ-FEHLER/leer -> gibt NULLEN zurueck. Grund: {!r}".format(e))
         return _fresh_stats()
 
     clean = _fresh_stats()
@@ -148,6 +199,9 @@ def _load_stats():
     for key in clean["format_counts"]:
         clean["format_counts"][key] = _clean_int(
             formats.get(key) if isinstance(formats, dict) else 0)
+    _dbg("_load_stats OK  files={} prompts={} tokens={} best={}".format(
+        clean["files_converted"], clean["prompts_analyzed"],
+        clean["tokens_saved_total"], clean["best_score"]))
     return clean
 
 
@@ -156,13 +210,20 @@ def _save_stats(stats):
     selben Verzeichnis, dann os.replace (atomar auf NTFS). Ein Absturz
     mitten im Schreiben kann so nie die bestehende Datei zerstoeren.
     Fehler duerfen die Kernfunktion nie stoppen."""
+    caller = _caller()
+    _dbg("_save_stats <- {} | SCHREIBT files={} prompts={} tokens={} best={} -> {}".format(
+        caller, stats.get("files_converted"), stats.get("prompts_analyzed"),
+        stats.get("tokens_saved_total"), stats.get("best_score"), STATS_PATH))
     tmp_path = STATS_PATH + ".tmp"
     try:
         with open(tmp_path, "w", encoding="utf-8") as f:
             json.dump(stats, f, indent=2)
         os.replace(tmp_path, STATS_PATH)
-    except Exception:
+        _dbg("_save_stats OK  ({}) geschrieben".format(caller))
+    except Exception as e:
         # Original bleibt unberuehrt; .tmp-Rest best effort entfernen
+        _dbg("_save_stats SCHREIBFEHLER ({}): {!r}".format(caller, e))
+        _dbg(traceback.format_exc())
         try:
             os.remove(tmp_path)
         except OSError:
@@ -647,6 +708,24 @@ if __name__ == "__main__":
     print(f"  Max. Dateigroesse:  {MAX_MB} MB")
     print("  Beenden mit:        Strg + C")
     print("=" * 60)
+
+    # --- Instrumentierung Block A/2: Laufzeit-Pfade + Ist-Zustand stats.json ---
+    _dbg("=== PRISMA START (Instrumentierung Block A/2) ===")
+    _dbg("START frozen={} executable={}".format(
+        getattr(sys, "frozen", False), sys.executable))
+    _dbg("START writable_dir={}".format(writable_dir()))
+    _dbg("START resource_dir={}".format(resource_dir()))
+    _dbg("START STATS_PATH={}".format(STATS_PATH))
+    _dbg("START DEBUG_LOG={}".format(_DEBUG_LOG_PATH))
+    try:
+        _st_exists = os.path.exists(STATS_PATH)
+        _st_head = ""
+        if _st_exists:
+            with open(STATS_PATH, "r", encoding="utf-8") as _f:
+                _st_head = _f.read(300)
+        _dbg("START stats.json exists={} head={!r}".format(_st_exists, _st_head))
+    except Exception as _e:
+        _dbg("START stats.json Check-Fehler: {!r}".format(_e))
 
     # Browser-Autostart NUR im eingefrorenen (.exe-)Zustand: dort gibt es
     # keine start.bat mehr. Im normalen "python app.py"-Betrieb bleibt der
