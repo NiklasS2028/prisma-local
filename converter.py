@@ -637,7 +637,10 @@ def extract_docx(path: str) -> dict:
         raw_parts.append(para.text)
         if not text:
             return
-        style = (para.style.name or "").lower()
+        # para.style ist None, wenn styles.xml keinen Default-Paragraph-Style
+        # definiert (Nicht-Word-Erzeuger wie docx-js oder pandoc-Minimal).
+        # Dann als Fliesstext behandeln, keine Ueberschriften-Erkennung.
+        style = (para.style.name or "").lower() if para.style is not None else ""
         if style.startswith("heading 1") or style == "title":
             md_parts.append(f"# {text}")
         elif style.startswith("heading 2"):

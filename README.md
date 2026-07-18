@@ -6,7 +6,7 @@ Local-first document converter with OCR, a rule-based prompt trainer, and usage 
 
 ![License: MIT](https://img.shields.io/badge/license-MIT-blue)
 ![Python 3.12](https://img.shields.io/badge/python-3.12-blue)
-![Tests: 136 passing](https://img.shields.io/badge/tests-136%20passing-brightgreen)
+![Tests: 138 passing](https://img.shields.io/badge/tests-138%20passing-brightgreen)
 ![100% local](https://img.shields.io/badge/privacy-100%25%20local-blueviolet)
 
 Built with: Python 3.12 · Flask · Tesseract OCR · pytest · Playwright
@@ -85,7 +85,7 @@ The promise is not "nothing is ever lost" but: **nothing is lost silently.** Wha
 
 ## Tests
 
-136 tests in 13 suites that construct their own test files (additionally required: `reportlab`, `playwright`). `test_block1`, `test_block2` and `test_blockI_batch` use the code directly / the Flask test client; all others need the server running (`python app.py`):
+138 tests in 13 suites that construct their own test files (additionally required: `reportlab`, `playwright`). `test_block1`, `test_block2` and `test_blockI_batch` use the code directly / the Flask test client; all others need the server running (`python app.py`):
 
 ```powershell
 python tests/test_block1.py        # Converter core (PDF/DOCX/XLSX/PPTX)

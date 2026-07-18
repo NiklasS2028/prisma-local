@@ -321,6 +321,43 @@ def test_pptx_structure_preserved():
         "Untertitel faelschlich als Aufzaehlung ausgegeben"
 
 
+def build_styleless_docx(path):
+    """DOCX wie von Nicht-Word-Erzeugern (docx-js, pandoc-minimal): Absaetze
+    ohne <w:pStyle> UND styles.xml ohne Default-Paragraph-Style. Erst diese
+    Kombination macht paragraph.style zu None - fehlt nur das pStyle, faellt
+    python-docx still auf den Default-Style ('Normal') zurueck."""
+    import docx
+    from docx.oxml.ns import qn
+    doc = docx.Document()
+    doc.add_heading("Protokoll Kickoff", level=1)
+    doc.add_paragraph("Teilnehmer: Alle. Ort: Remote.")
+    p = doc.add_paragraph("Absatz ohne jede Stil-Angabe.")
+    pPr = p._p.find(qn("w:pPr"))
+    if pPr is not None:
+        ps = pPr.find(qn("w:pStyle"))
+        if ps is not None:
+            pPr.remove(ps)
+    for st in doc.styles.element.findall(qn("w:style")):
+        if (st.get(qn("w:type")) == "paragraph"
+                and st.get(qn("w:default")) == "1"):
+            st.set(qn("w:default"), "0")
+    doc.save(path)
+
+
+def test_docx_style_none_survives():
+    """Block B: paragraph.style=None (Nicht-Word-DOCX) darf nicht crashen.
+    Style-lose Absaetze werden als normaler Fliesstext behandelt."""
+    path = os.path.join(FIXTURES, "ohne_style.docx")
+    build_styleless_docx(path)
+    r = convert_file(path)
+    assert r["ok"], f"Konvertierung fehlgeschlagen: {r.get('error')}"
+    out = r["output_text"]
+    assert "# Protokoll Kickoff" in out, "Explizit gestylte Ueberschrift fehlt"
+    assert "Absatz ohne jede Stil-Angabe." in out, "Style-loser Absatz fehlt"
+    assert "# Absatz ohne jede Stil-Angabe." not in out, \
+        "Style-loser Absatz faelschlich als Ueberschrift"
+
+
 def test_csv_branch_keeps_companion_text():
     """Nebenpunkt: CSV-Zweig verwirft Begleittext nicht mehr."""
     path = os.path.join(FIXTURES, "tabellen.pdf")
@@ -386,6 +423,7 @@ ALL_TESTS = [
     test_e_xlsx_formula_fallback,
     test_pptx_notes_hint,
     test_pptx_structure_preserved,
+    test_docx_style_none_survives,
     test_csv_branch_keeps_companion_text,
     test_image_hint_in_text_pdf,
     test_regression_plain_text_pdf,
