@@ -346,6 +346,59 @@ def _plain_records(text):
     return [{"text": s} for s in text.split("\n")]
 
 
+# Toleranz beim Zuordnen von Zeilen zu Tabellen-BBoxes (Rundungsartefakte
+# an den Gitterlinien, vgl. den Newmont-Ueberhang aus Block H)
+_TABLE_BBOX_TOL = 2.0
+
+
+def _mark_table_zones(pages_items, pages_tables):
+    """Markiert Zeilen, die in einer Tabellen-BBox liegen (rec['table']=k).
+
+    Zonen-Semantik wie pdfplumber.outside_bbox (das der CSV-Zweig seit
+    Block 1 nutzt): ein Objekt gehoert zur Zone, wenn es VOLLSTAENDIG in
+    der BBox liegt. Eine Zeile liegt genau dann vollstaendig drin, wenn
+    ihre eigene BBox drin liegt - das wenden wir auf die konsistenz-
+    gesicherten Zeilen-Records an, statt einen zweiten Extraktionslauf
+    ueber outside_bbox zu starten (der wuerde den extract_text-Anker aus
+    C2 brechen). Ragt eine Zeile seitlich ueber die Tabelle hinaus
+    (Mehrspalten-Faelle, ausserhalb des Scopes), bleibt sie konservativ
+    Fliesstext - Textverlust ist das schlimmere Uebel als eine Dublette.
+    """
+    for page_recs_, tables in zip(pages_items, pages_tables):
+        if not tables:
+            continue
+        for rec in page_recs_:
+            if rec.get("top") is None:
+                continue
+            for k, t in enumerate(tables):
+                bx0, btop, bx1, bbottom = t["bbox"]
+                if (rec["x0"] >= bx0 - _TABLE_BBOX_TOL
+                        and rec["x1"] <= bx1 + _TABLE_BBOX_TOL
+                        and rec["top"] >= btop - _TABLE_BBOX_TOL
+                        and rec["bottom"] <= bbottom + _TABLE_BBOX_TOL):
+                    rec["table"] = k
+                    break
+
+
+def _pipe_table(rows):
+    """Tabelle als Markdown-Pipe-Tabelle. Zell-Robustheit:
+    '|' -> '\\|' (sonst zerbricht die Tabelle), Zeilenumbruch in der
+    Zelle -> Leerzeichen (Pipe-Zellen sind einzeilig), None/leer ->
+    leere Zelle. Alle Zeilen werden auf die Header-Breite normalisiert."""
+    def cell(c):
+        s = "" if c is None else str(c)
+        return s.replace("\n", " ").replace("|", "\\|").strip()
+
+    norm = [[cell(c) for c in row] for row in rows]
+    width = len(norm[0])
+    lines = ["| " + " | ".join(norm[0]) + " |",
+             "| " + " | ".join(["---"] * width) + " |"]
+    for row in norm[1:]:
+        row = (row + [""] * width)[:width]
+        lines.append("| " + " | ".join(row) + " |")
+    return lines
+
+
 def _mark_headings(pages_items):
     """Markiert konservativ erkannte Ueberschriften (rec['heading'] = 1..3).
 
@@ -362,8 +415,10 @@ def _mark_headings(pages_items):
     des dritten Clusters bleiben konservativ Fliesstext.
     Rueckgabe: Anzahl markierter Ueberschriften.
     """
+    # Tabellenzonen (C3) sind fuer Headings tabu und verfaelschen auch den
+    # Fliesstext-Median nicht (Zellen sind oft kleiner gesetzt).
     geo = [r for page in pages_items for r in page
-           if r.get("size") and r.get("n_chars")]
+           if r.get("size") and r.get("n_chars") and r.get("table") is None]
     if not geo:
         return 0
 
@@ -387,6 +442,8 @@ def _mark_headings(pages_items):
         for r in page:
             if not r.get("size") or not r.get("n_chars"):
                 continue
+            if r.get("table") is not None:
+                continue  # Tabellenzonen-Veto (C3)
             text = r["text"].strip()
             if not text or len(text) > _HEADING_MAX_CHARS:
                 continue
@@ -426,13 +483,27 @@ def _mark_headings(pages_items):
     return n
 
 
-def _render_lines(pages_items):
-    """Baut aus den (ggf. Heading-markierten) Zeilen-Records die Textzeilen.
-    Headings bekommen Leerzeilen davor/dahinter (gueltiges Markdown);
-    ueberzaehlige Leerzeilen kollabiert _clean_text danach."""
+def _render_lines(pages_items, pages_tables=None):
+    """Baut aus den markierten Zeilen-Records die Textzeilen.
+    Headings bekommen Leerzeilen davor/dahinter (gueltiges Markdown).
+    Tabellenzonen: die ERSTE Zeile einer Zone emittiert die Pipe-Tabelle
+    an genau dieser Stelle im Textfluss, alle weiteren Zonen-Zeilen werden
+    uebersprungen (kein Zellinhalt doppelt). Zonen ohne verbliebene Zeilen
+    emittieren nichts - dann bleibt alles wie vor Block C.
+    Ueberzaehlige Leerzeilen kollabiert _clean_text danach."""
     out = []
-    for page in pages_items:
+    for p_idx, page in enumerate(pages_items):
+        tables = pages_tables[p_idx] if pages_tables else []
+        emitted = set()
         for r in page:
+            k = r.get("table")
+            if k is not None:
+                if k not in emitted:
+                    emitted.add(k)
+                    out.append("")
+                    out.extend(_pipe_table(tables[k]["rows"]))
+                    out.append("")
+                continue
             level = r.get("heading")
             if level:
                 out.append("")
@@ -546,6 +617,7 @@ def extract_pdf(path: str) -> dict:
 
     page_texts = []       # extrahierter Text pro Seite (Index 0 = Seite 1)
     page_recs = []        # Zeilen-Records mit Geometrie pro Seite (oder None)
+    page_tbl_infos = []   # pro Seite: [{"bbox","rows"}] fuer Pipe-Tabellen (C3)
     extra_texts = []      # Text AUSSERHALB von Tabellen pro Seite (fuer CSV-Zweig)
     all_tables = []
     n_images = 0
@@ -566,10 +638,17 @@ def extract_pdf(path: str) -> dict:
                 page_images = len(page.images or [])
                 tables_on_page = page.find_tables()
                 page_tables = []
+                tbl_infos = []
                 for t in tables_on_page:
                     data = t.extract()
                     if data:
                         page_tables.append(data)
+                        # fuer den Markdown-Zweig (C3): Tabellen mit BBox,
+                        # aber nur wenn mindestens EINE Zelle Inhalt hat
+                        # (leere Gitter sind keine Tabellen, nur Linien)
+                        if any(c is not None and str(c).strip()
+                               for row in data for c in row):
+                            tbl_infos.append({"bbox": t.bbox, "rows": data})
                 # Begleittext ausserhalb der Tabellen-Bereiche merken, damit
                 # der CSV-Zweig ihn nicht stillschweigend verwirft.
                 # strict=False: reale PDFs enthalten Tabellen, deren Box durch
@@ -588,9 +667,10 @@ def extract_pdf(path: str) -> dict:
                 if not first_error:
                     first_error = f"Seite {page_no}: {e}"
                 txt, extra, page_tables, page_images = "", "", [], 0
-                recs = None
+                recs, tbl_infos = None, []
             page_texts.append(txt)
             page_recs.append(recs)
+            page_tbl_infos.append(tbl_infos)
             extra_texts.append(extra)
             all_tables.extend(page_tables)
             n_images += page_images
@@ -678,26 +758,34 @@ def extract_pdf(path: str) -> dict:
         # Bildseiten aus der OCR (nur Text, keine Geometrie).
         assembled = []
         pages_items = []
+        pages_tbl = []   # Pipe-Tabellen nur fuer Seiten mit Geometrie-Records
         for i in range(1, n_pages + 1):
             if i in ocr_texts and ocr_texts[i].strip():
                 assembled.append(ocr_texts[i])
                 pages_items.append(_plain_records(ocr_texts[i]))
+                pages_tbl.append([])
             elif i in image_pages:
                 assembled.append("")  # OCR fehlgeschlagen -> Seite fehlt
                 pages_items.append(_plain_records(""))
+                pages_tbl.append([])
             else:
                 assembled.append(page_texts[i - 1])
                 recs = page_recs[i - 1]
-                pages_items.append(recs if recs is not None
-                                   else _plain_records(page_texts[i - 1]))
+                if recs is not None:
+                    pages_items.append(recs)
+                    pages_tbl.append(page_tbl_infos[i - 1])
+                else:
+                    pages_items.append(_plain_records(page_texts[i - 1]))
+                    pages_tbl.append([])
 
         # WICHTIG: Kopf-/Fusszeilen-Entfernung laeuft VOR der Strukturlogik
         # (zeilenbasierte Wiederholungserkennung braucht die Originalzeilen).
         cleaned_pages, removed, removed_patterns = \
             _strip_repeating_headers_footers(pages_items,
                                              key=lambda r: r["text"])
+        _mark_table_zones(cleaned_pages, pages_tbl)
         _mark_headings(cleaned_pages)
-        md = _clean_text("\n".join(_render_lines(cleaned_pages)))
+        md = _clean_text("\n".join(_render_lines(cleaned_pages, pages_tbl)))
 
         ocr_ok = [i for i in image_pages if ocr_texts.get(i, "").strip()]
         ocr_failed = [i for i in image_pages if i not in ocr_ok]
@@ -749,9 +837,15 @@ def extract_pdf(path: str) -> dict:
         }
 
     # ---- Fall 3: normale Text-PDF ----
-    pages_items = [page_recs[i] if page_recs[i] is not None
-                   else _plain_records(t)
-                   for i, t in enumerate(page_texts)]
+    pages_items = []
+    pages_tbl = []   # Pipe-Tabellen nur fuer Seiten mit Geometrie-Records
+    for i, t in enumerate(page_texts):
+        if page_recs[i] is not None:
+            pages_items.append(page_recs[i])
+            pages_tbl.append(page_tbl_infos[i])
+        else:
+            pages_items.append(_plain_records(t))
+            pages_tbl.append([])
     # bereinigt: wiederkehrende Kopf-/Fusszeilen raus. Laeuft VOR der
     # Strukturlogik - die Wiederholungserkennung braucht die Originalzeilen.
     cleaned_pages, removed, removed_patterns = \
@@ -781,9 +875,11 @@ def extract_pdf(path: str) -> dict:
         }
 
     # Standardfall: Fliesstext -> Markdown (kopf-/fusszeilenbereinigt,
-    # konservativ erkannte Ueberschriften als #/##/###)
+    # konservativ erkannte Ueberschriften als #/##/###, Gitter-Tabellen
+    # als Pipe-Tabellen inline im Textfluss)
+    _mark_table_zones(cleaned_pages, pages_tbl)
     _mark_headings(cleaned_pages)
-    md = _clean_text("\n".join(_render_lines(cleaned_pages)))
+    md = _clean_text("\n".join(_render_lines(cleaned_pages, pages_tbl)))
     if removed > 0:
         note = (f"PDF-Fliesstext als Markdown bereinigt. "
                 f"{removed} wiederkehrende Kopf-/Fusszeilen entfernt."

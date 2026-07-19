@@ -104,10 +104,13 @@ def _draw_par_ragged(c, lines, y, font=BODY_FONT, size=BODY_SIZE,
 
 
 def _draw_grid_table(c, y_top, rows, col_w=150, row_h=24,
-                     font=BODY_FONT, size=10):
+                     font=BODY_FONT, size=10,
+                     header_font=None, header_size=None):
     """Tabelle mit sichtbaren Gitterlinien (das, was pdfplumber per
-    find_tables sicher erkennt). Gibt die y-Position UNTER der Tabelle
-    zurueck."""
+    find_tables sicher erkennt). Zellen duerfen '\\n' enthalten (werden
+    als mehrere Textzeilen in der Zelle gezeichnet). Optional eigene
+    Schrift fuer die Kopfzeile (C3: Heading-Falle in der Tabelle).
+    Gibt die y-Position UNTER der Tabelle zurueck."""
     n_r, n_c = len(rows), len(rows[0])
     xs = [LEFT + i * col_w for i in range(n_c + 1)]
     ys = [y_top - i * row_h for i in range(n_r + 1)]
@@ -116,10 +119,14 @@ def _draw_grid_table(c, y_top, rows, col_w=150, row_h=24,
         c.line(xs[0], yl, xs[-1], yl)
     for xl in xs:
         c.line(xl, ys[-1], xl, ys[0])
-    c.setFont(font, size)
     for r, row in enumerate(rows):
+        if r == 0 and header_font:
+            c.setFont(header_font, header_size or size)
+        else:
+            c.setFont(font, size)
         for k, cell in enumerate(row):
-            c.drawString(xs[k] + 6, ys[r] - row_h + 8, cell)
+            for j, part in enumerate(str(cell).split("\n")):
+                c.drawString(xs[k] + 6, ys[r] - 12 - 11 * j, part)
     return ys[-1]
 
 
@@ -383,10 +390,88 @@ def build_misch_pdf(path):
     c.setFont("Helvetica-Bold", 14)
     c.drawString(LEFT, y - 18, E_HEAD2)
     y = _draw_par_justified(c, E_PAR2, y - 42)
-    y_below = _draw_grid_table(c, y - 12, E_TABLE)
+    # Kopfzeile der Tabelle absichtlich fett/14pt: erfuellt ALLE C2-Signale
+    # (Groesse, Fettung, kurz) - darf aber wegen des Tabellenzonen-Vetos
+    # (C3) NIE zum Heading werden.
+    y_below = _draw_grid_table(c, y - 12, E_TABLE,
+                               header_font="Helvetica-Bold", header_size=14)
     c.setFont(BODY_FONT, BODY_SIZE)
     c.drawString(LEFT, y_below - 24, E_CLOSE)
     c.showPage()
+    c.save()
+
+
+# ---------------------------------------------------------------------------
+# FIXTURE f) ZELL-ROBUSTHEIT (C3)
+# ---------------------------------------------------------------------------
+# Tabelle mit den drei Zell-Sonderfaellen: '|' im Zellinhalt (muss zu \|
+# escaped werden), Zeilenumbruch IN der Zelle (muss zu Leerzeichen werden),
+# leere Zelle (muss leere Pipe-Zelle bleiben).
+
+F_INTRO = "Die folgende Tabelle enthaelt bewusst unbequeme Zellinhalte:"
+F_TABLE = [
+    ["Name", "Beschreibung", "Anmerkung"],
+    ["Produkt A|B", "Wert\nzweizeilig", ""],
+]
+F_CLOSE = "Nach der Tabelle geht der Text normal weiter."
+
+SOLL_F = [
+    F_INTRO,
+    "",
+    "| Name | Beschreibung | Anmerkung |",
+    "| --- | --- | --- |",
+    "| Produkt A\\|B | Wert zweizeilig |  |",
+    "",
+    F_CLOSE,
+]
+
+
+def build_zellen_pdf(path):
+    from reportlab.pdfgen import canvas
+    c = canvas.Canvas(path, pagesize=A4_PT)
+    c.setFont(BODY_FONT, BODY_SIZE)
+    c.drawString(LEFT, 780, F_INTRO)
+    y_below = _draw_grid_table(c, 756, F_TABLE, row_h=36)
+    c.setFont(BODY_FONT, BODY_SIZE)
+    c.drawString(LEFT, y_below - 24, F_CLOSE)
+    c.showPage()
+    c.save()
+
+
+# ---------------------------------------------------------------------------
+# FIXTURE g) MEHRSEITIGE TABELLEN (C3)
+# ---------------------------------------------------------------------------
+# Auf Seite 1 und Seite 2 je eine eigene Gitter-Tabelle (gleiche Kopfzeile,
+# wie bei ueber Seiten fortgesetzten Tabellen ueblich). SOLL konservativ:
+# NICHT zusammennaehen - pro Seite eine eigene Pipe-Tabelle in ihrem
+# jeweiligen Textfluss.
+
+G_PAGE1_TEXT = [
+    "Kostenaufstellung fuer das erste Halbjahr des laufenden Jahres.",
+    "Die Werte stammen aus der Buchhaltung und sind gerundet.",
+    "Zunaechst die monatlich wiederkehrenden Posten:",
+]
+G_TABLE1 = [["Posten", "Wert"], ["Miete", "500"]]
+G_PAGE1_CLOSE = "Fortsetzung der Aufstellung auf der naechsten Seite."
+G_PAGE2_TEXT = [
+    "Fortsetzung der Kostenaufstellung aus dem ersten Teil.",
+    "Auch diese Werte sind kaufmaennisch gerundet worden.",
+    "Es folgen die verbrauchsabhaengigen Posten:",
+]
+G_TABLE2 = [["Posten", "Wert"], ["Strom", "80"]]
+G_PAGE2_CLOSE = "Damit ist die Aufstellung vollstaendig abgeschlossen."
+
+
+def build_mehrseitig_pdf(path):
+    from reportlab.pdfgen import canvas
+    c = canvas.Canvas(path, pagesize=A4_PT)
+    for texts, table, close in ((G_PAGE1_TEXT, G_TABLE1, G_PAGE1_CLOSE),
+                                (G_PAGE2_TEXT, G_TABLE2, G_PAGE2_CLOSE)):
+        y = _draw_par_ragged(c, texts, 780)
+        y_below = _draw_grid_table(c, y - 6, table)
+        c.setFont(BODY_FONT, BODY_SIZE)
+        c.drawString(LEFT, y_below - 24, close)
+        c.showPage()
     c.save()
 
 
@@ -396,6 +481,8 @@ ALL_FIXTURES = [
     ("c_adresse", "struct_adresse.pdf", build_adresse_pdf, SOLL_C),
     ("d_liste", "struct_liste.pdf", build_liste_pdf, SOLL_D),
     ("e_misch", "struct_misch.pdf", build_misch_pdf, SOLL_E),
+    ("f_zellen", "struct_zellen.pdf", build_zellen_pdf, SOLL_F),
+    ("g_mehrseitig", "struct_mehrseitig.pdf", build_mehrseitig_pdf, None),
 ]
 
 
@@ -429,6 +516,8 @@ _ANCHORS = {
     "d_liste": ["Vollstaendigkeit", "Budgetfreigabe", "Archiv"],
     "e_misch": [E_TITLE, E_HEAD1, E_HEAD2, "Umsatz in Mio Euro", "120",
                 E_CLOSE],
+    "f_zellen": [F_INTRO, "Produkt A", "zweizeilig", F_CLOSE],
+    "g_mehrseitig": ["Miete", "500", "Strom", "80", G_PAGE2_CLOSE],
 }
 
 
@@ -582,6 +671,106 @@ def test_c2_kapitel_headings_and_stripping_intact():
 
 
 # ---------------------------------------------------------------------------
+# C3: TABELLEN ALS PIPE-TABELLEN, INLINE IM TEXTFLUSS
+# ---------------------------------------------------------------------------
+
+def test_c3_table_header_not_heading():
+    """Praezisierung 1: Die Tabellen-Kopfzeile in e ist fett/14pt und
+    erfuellt damit ALLE C2-Signale - das Tabellenzonen-Veto muss sie
+    trotzdem vom Heading fernhalten. Headings bleiben exakt die drei."""
+    r = _convert_fixture("e_misch")
+    lines = r["output_text"].split("\n")
+    headings = [l for l in lines if l.startswith("#")]
+    assert headings == ["# Jahresbericht der Beispiel GmbH",
+                        "## Wirtschaftliche Entwicklung",
+                        "## Kennzahlen und Ausblick"], \
+        f"Tabellenzeile wurde zum Heading: {headings}"
+
+
+def test_c3_misch_pipe_table_flow():
+    """Praezisierung 3: exakte Reihenfolge im Textfluss - Abschnitt,
+    Einleitungssatz, Pipe-Tabelle, Schlusssatz (pinnt die Position)."""
+    r = _convert_fixture("e_misch")
+    lines = r["output_text"].split("\n")
+    for wanted in ("| Kennzahl | 2024 | 2025 |",
+                   "| --- | --- | --- |",
+                   "| Umsatz in Mio Euro | 100 | 120 |",
+                   "| Gewinn in Mio Euro | 10 | 15 |"):
+        assert wanted in lines, f"Pipe-Zeile fehlt: {wanted}\n{lines}"
+    order = [
+        lines.index("## Kennzahlen und Ausblick"),
+        lines.index("Die wichtigsten Kennzahlen der beiden letzten "
+                    "Geschaeftsjahre sind in der"),
+        lines.index("| Kennzahl | 2024 | 2025 |"),
+        lines.index("| --- | --- | --- |"),
+        lines.index("| Umsatz in Mio Euro | 100 | 120 |"),
+        lines.index("| Gewinn in Mio Euro | 10 | 15 |"),
+        lines.index(E_CLOSE),
+    ]
+    assert order == sorted(order), \
+        f"Tabelle steht nicht an der korrekten Position im Textfluss: {order}"
+
+
+def test_c3_no_cell_duplicates():
+    """Praezisierung 2, der klassische Fehler: Zellinhalt darf NICHT
+    doppelt erscheinen (einmal flach, einmal in der Pipe-Tabelle)."""
+    r = _convert_fixture("e_misch")
+    out = r["output_text"]
+    # eindeutige Zellinhalte ('Kennzahl' allein waere Substring des
+    # Headings 'Kennzahlen und Ausblick' - kein Dubletten-Beleg)
+    for cell_text in ("Umsatz in Mio Euro", "Gewinn in Mio Euro",
+                      "2024", "2025", "120"):
+        n = out.count(cell_text)
+        assert n == 1, f"Zellinhalt '{cell_text}' erscheint {n}x (Dublette!)"
+    assert out.count("| Kennzahl | 2024 | 2025 |") == 1, \
+        "Tabellen-Kopfzeile fehlt oder erscheint mehrfach"
+    flat_lines = [l for l in out.split("\n") if not l.startswith("|")]
+    for flat in ("Kennzahl 2024 2025", "Umsatz in Mio Euro 100 120"):
+        assert not any(flat in l for l in flat_lines), \
+            f"Tabellenzeile steht noch flach im Text: '{flat}'"
+
+
+def test_c3_cell_robustness():
+    """Praezisierung 4: '|' escaped, Zell-Umbruch -> Leerzeichen, leere
+    Zelle bleibt leere Pipe-Zelle, Spaltenzahl ueberall konsistent."""
+    import re as _re
+    r = _convert_fixture("f_zellen")
+    lines = r["output_text"].split("\n")
+    assert "| Name | Beschreibung | Anmerkung |" in lines, lines
+    assert "| Produkt A\\|B | Wert zweizeilig |  |" in lines, \
+        f"Zell-Sonderfaelle falsch gerendert:\n" + "\n".join(lines)
+    assert F_INTRO in lines and F_CLOSE in lines, "Begleittext fehlt"
+    assert lines.index(F_INTRO) < lines.index("| --- | --- | --- |") \
+        < lines.index(F_CLOSE), "Tabelle nicht zwischen den Begleitsaetzen"
+    # jede Pipe-Zeile hat exakt 3 Zellen (an UNescapten Pipes gesplittet)
+    for l in lines:
+        if l.startswith("|"):
+            cells = _re.split(r"(?<!\\)\|", l)
+            assert len(cells) == 5, f"Zeile zerbrochen ({len(cells)-2} Zellen): {l}"
+    # kein Zellinhalt doppelt
+    assert r["output_text"].count("zweizeilig") == 1
+    assert r["output_text"].count("Produkt A") == 1
+
+
+def test_c3_multipage_tables_not_stitched():
+    """Praezisierung 4: Tabellen auf zwei Seiten werden NICHT zusammen-
+    genaeht - pro Seite eine eigene Pipe-Tabelle an ihrer Position."""
+    r = _convert_fixture("g_mehrseitig")
+    lines = r["output_text"].split("\n")
+    seps = [i for i, l in enumerate(lines) if l == "| --- | --- |"]
+    assert len(seps) == 2, \
+        f"Erwartet zwei getrennte Pipe-Tabellen, gefunden {len(seps)}:\n" \
+        + "\n".join(lines)
+    assert "| Miete | 500 |" in lines and "| Strom | 80 |" in lines, lines
+    assert (lines.index("| Miete | 500 |") < lines.index(G_PAGE1_CLOSE)
+            < lines.index("| Strom | 80 |") < lines.index(G_PAGE2_CLOSE)), \
+        "Tabellen stehen nicht im Textfluss ihrer jeweiligen Seite"
+    # Zellinhalte nur in den Pipe-Tabellen, nicht zusaetzlich flach
+    assert r["output_text"].count("Miete") == 1
+    assert r["output_text"].count("Strom") == 1
+
+
+# ---------------------------------------------------------------------------
 # BASELINE-MODUS (C1-Ist-Aufnahme): Output + Token-Zahlen aller Fixtures
 # ---------------------------------------------------------------------------
 
@@ -618,6 +807,11 @@ ALL_TESTS = [
     test_c2_bold_word_in_body_never_heading,
     test_c2_plain_fixtures_byte_identical,
     test_c2_kapitel_headings_and_stripping_intact,
+    test_c3_table_header_not_heading,
+    test_c3_misch_pipe_table_flow,
+    test_c3_no_cell_duplicates,
+    test_c3_cell_robustness,
+    test_c3_multipage_tables_not_stitched,
 ]
 
 if __name__ == "__main__":
