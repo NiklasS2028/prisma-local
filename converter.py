@@ -483,21 +483,225 @@ def _mark_headings(pages_items):
     return n
 
 
+# ---------------------------------------------------------------------------
+# C4: ZEILENVERBINDUNG UND SILBENTRENNUNG
+# ---------------------------------------------------------------------------
+# Kernregel: Ein Umbruch wird NUR entfernt, wenn Geometrie UND Text zustimmen.
+# Im Zweifel bleibt der Umbruch erhalten - stiller Strukturverlust ist das
+# schlimmere Uebel als ein behaltener Umbruch (dieselbe konservative
+# Asymmetrie wie bei der Heading-Erkennung in C2).
+#
+# GEOMETRIE (notwendig): die OBERE Zeile muss "voll" sein, also bis an den
+# rechten Textrand der Seite reichen - dann hat sie der Setzer umbrochen, nicht
+# der Autor beendet. Eine kurze Zeile erreicht den Rand nie und zieht deshalb
+# nie einen Nachfolger; damit IST der Voll-Test zugleich die Kurzzeilen-
+# Sicherung (Adressbloecke, abgesetzte Kurzzeilen bleiben stehen), ein
+# separates Kurzzeilen-Veto ist unnoetig. Auf derselben Seite muss die
+# naechste Zeile ausserdem im selben Absatz-Block liegen (vertikaler Abstand
+# nicht groesser als das Leading mal _JOIN_BLOCK_FACTOR).
+#
+# TEXT: zwei Signale mit BEWUSST unterschiedlichem Gewicht -
+#   STARK, IMMER Pflicht (in JEDEM Regime): die obere Zeile endet NICHT auf
+#     einem Satzschlusszeichen (. ! ? : ;). Faengt die Falle "geometrisch voll,
+#     aber inhaltlich abgeschlossen" (ein Satz endet genau am Justierungsrand).
+#     Dieses Signal wird NIRGENDS umgangen - auch nicht im Blocksatz (Test
+#     test_c4_blocksatz_period_not_bypassed sichert das negativ ab).
+#   SCHWACH, nur im Flattersatz Pflicht: die Folgezeile beginnt klein. Im
+#     Deutschen ist das ein SCHWACHES Signal, weil jedes Substantiv gross
+#     geschrieben wird und Zeilen sehr oft vor einem Substantiv umbrechen -
+#     als harte Pflicht wuerde es einen Grossteil korrekter Umbrueche brechen
+#     (z.B. "...gerne zur" + "Verfuegung"). Deshalb nur verlangt, wenn der
+#     rechte Rand unscharf ist (Flattersatz). Bei echtem Blocksatz (die obere
+#     Zeile sitzt auf einem von >=2 Zeilen geteilten Justierungsrand) beweist
+#     die Geometrie den Umbruch bereits, und das schwache Signal wird
+#     fallengelassen. Hintergrund: Vault-Notiz "Blocksatz-Bypass fuer deutsche
+#     Substantive bei PDF-Zeilenverbindung".
+#
+# Alle Toleranzen sind aus den Fixture-Messungen (Suite 13) hergeleitet.
+
+_JOIN_RIGHT_EDGE_TOL = 2.0   # pt: Zeile gilt als "voll", wenn ihr x1 so nah am
+                             # rechten Textrand liegt. Gemessen: alle ziehenden
+                             # Zeilen sitzen bei gap 0.00, die naechste NICHT
+                             # ziehende (Fixture b, 28%-Zeile) erst bei gap 276 -
+                             # dazwischen ist alles leer. Bewusst = _TABLE_BBOX_TOL.
+_JOIN_BLOCK_FACTOR = 1.35    # top-Delta > Leading*Faktor => neuer Absatz-Block.
+                             # Gemessen nur zwei Deltas: intra 14.0, inter 24.0;
+                             # Schwelle 18.9 bei Leading 14 liegt fast symmetrisch
+                             # dazwischen (26% unter intra, 27% ueber inter).
+_JUSTIFY_SHARE_TOL = 0.5     # pt: teilen sich >=2 Body-Zeilen den rechten Rand
+                             # so eng, gilt er als echte Blocksatz-Justierungskante.
+_JOIN_TERMINAL_PUNCT = ".!?:;"
+
+
+def _median(xs):
+    s = sorted(xs)
+    n = len(s)
+    if n == 0:
+        return None
+    return s[n // 2] if n % 2 else (s[n // 2 - 1] + s[n // 2]) / 2
+
+
+# Listen-Marker am Zeilenanfang: solche Zeilen verbinden nie (weder ziehen sie
+# noch werden sie gezogen) - Aufzaehlungen bleiben zeilenweise.
+_LIST_MARKER_RE = re.compile(
+    r"^\s*([•‣●◦⁃∙*\-–—]\s|\d+[.)]\s)")
+
+
+def _is_list_marker(text):
+    return bool(_LIST_MARKER_RE.match(text or ""))
+
+
+def _page_geometry(page):
+    """Per-Seite-Geometrie fuer die Zeilenverbindung (C4).
+    right_edge:      rechter Textrand (max x1 der Body-Zeilen).
+    justify_margin:  right_edge, WENN ihn >=2 Body-Zeilen innerhalb
+                     _JUSTIFY_SHARE_TOL teilen (echter Blocksatzrand), sonst None.
+    leading:         Median der vertikalen Abstaende UNMITTELBAR benachbarter
+                     Body-Zeilen (Heading/Tabelle unterbricht die Nachbarschaft).
+    deltas:          die gemessenen Abstaende (fuer den dokumentweiten Fallback).
+    Body = Zeile mit Geometrie, kein Heading, keine Tabellenzone. Seiten ohne
+    Geometrie (OCR/Fallback) liefern ueberall None -> keine Verbindung.
+    """
+    body = [r for r in page
+            if r.get("x1") is not None and r.get("heading") is None
+            and r.get("table") is None]
+    right_edge = max((r["x1"] for r in body), default=None)
+    justify_margin = None
+    if right_edge is not None:
+        n_at = sum(1 for r in body if right_edge - r["x1"] <= _JUSTIFY_SHARE_TOL)
+        if n_at >= 2:
+            justify_margin = right_edge
+    deltas = []
+    prev_body = None
+    for r in page:
+        if (r.get("x1") is None or r.get("heading") is not None
+                or r.get("table") is not None):
+            prev_body = None
+            continue
+        if (prev_body is not None and r.get("top") is not None
+                and prev_body.get("top") is not None):
+            d = r["top"] - prev_body["top"]
+            if d > 0:
+                deltas.append(d)
+        prev_body = r
+    return {"right_edge": right_edge, "justify_margin": justify_margin,
+            "leading": _median(deltas), "deltas": deltas}
+
+
+def _line_full(rec, geo):
+    """Zeile reicht bis an den rechten Textrand (vom Setzer umbrochen)?"""
+    edge = geo["right_edge"]
+    return (edge is not None and rec.get("x1") is not None
+            and edge - rec["x1"] <= _JOIN_RIGHT_EDGE_TOL)
+
+
+def _line_at_margin(rec, geo):
+    """Zeile sitzt auf dem geteilten Blocksatz-Justierungsrand (falls vorhanden)
+    - dann ist der Umbruch geometrisch bewiesen (Blocksatz-Bypass)."""
+    jm = geo["justify_margin"]
+    return (jm is not None and rec.get("x1") is not None
+            and abs(rec["x1"] - jm) <= _JUSTIFY_SHARE_TOL)
+
+
+def _merge_join(acc, add):
+    """Verbindet zwei Zeilen. Silbentrennung am Zeilenende:
+    endet die obere Zeile auf '-', wird der Bindestrich ENTFERNT, wenn davor ein
+    Buchstabe steht UND die Folgezeile klein beginnt (weiche Trennung:
+    'Silben-'+'trennung' -> 'Silbentrennung'); sonst BLEIBT er (echtes
+    Bindestrich-Wort: 'E-'+'Mail' -> 'E-Mail'). Ohne Bindestrich: Leerzeichen."""
+    left = acc.rstrip()
+    right = add.lstrip()
+    if left.endswith("-"):
+        core = left[:-1].rstrip()
+        if core and core[-1].isalpha() and right[:1].islower():
+            return core + right
+        return left + right
+    return left + " " + right
+
+
+def _should_join(prev, cur_rec, cur_geo, cur_page_idx):
+    """Entscheidet, ob cur_rec die offene Zeile prev fortsetzt (C4-Kernregel).
+    prev: {rec, page_idx, full, at_margin} - full/at_margin sind mit der
+    Geometrie VON PREVS Seite berechnet (wichtig fuer den Seitenuebergang)."""
+    ptext = prev["rec"]["text"].rstrip()
+    # STARKES Textsignal, immer Pflicht: kein Satzschlusszeichen am Ende.
+    if ptext and ptext[-1] in _JOIN_TERMINAL_PUNCT:
+        return False
+    # Geometrie: die obere Zeile muss voll sein (vom Setzer umbrochen).
+    if not prev["full"]:
+        return False
+    # Aufzaehlungen bleiben zeilenweise (Marker oben oder unten -> kein Join).
+    if _is_list_marker(prev["rec"]["text"]) or _is_list_marker(cur_rec["text"]):
+        return False
+    cs = cur_rec["text"].lstrip()
+    if not cs:
+        return False
+    # Auf derselben Seite: gleiche Absatz-Block-Zugehoerigkeit (vertikaler
+    # Abstand). Ueber Seitengrenzen gibt es kein Abstandssignal - dort traegt
+    # die Entscheidung allein Geometrie (voll) + Text.
+    if prev["page_idx"] == cur_page_idx:
+        leading = cur_geo["leading"]
+        if (leading and cur_rec.get("top") is not None
+                and prev["rec"].get("top") is not None):
+            if cur_rec["top"] - prev["rec"]["top"] > leading * _JOIN_BLOCK_FACTOR:
+                return False
+    # SCHWACHES Textsignal (nur Flattersatz): Folgezeile beginnt klein. Bei
+    # echtem Blocksatz (prev auf geteiltem Justierungsrand) fallengelassen.
+    if not prev["at_margin"]:
+        first = cs[0]
+        if first.isalpha() and first.isupper():
+            return False
+    return True
+
+
 def _render_lines(pages_items, pages_tables=None):
-    """Baut aus den markierten Zeilen-Records die Textzeilen.
-    Headings bekommen Leerzeilen davor/dahinter (gueltiges Markdown).
-    Tabellenzonen: die ERSTE Zeile einer Zone emittiert die Pipe-Tabelle
-    an genau dieser Stelle im Textfluss, alle weiteren Zonen-Zeilen werden
-    uebersprungen (kein Zellinhalt doppelt). Zonen ohne verbliebene Zeilen
-    emittieren nichts - dann bleibt alles wie vor Block C.
-    Ueberzaehlige Leerzeilen kollabiert _clean_text danach."""
+    """Baut aus den markierten Zeilen-Records die Textzeilen und verbindet
+    dabei umbrochene Fliesstext-Zeilen wieder zu Absaetzen (C4, Regel siehe
+    oben). Headings und Pipe-Tabellen unveraendert wie in C2/C3.
+
+    Leerzeilen: ein Absatz, in dem TATSAECHLICH verbunden wurde, bekommt
+    Leerzeilen davor/dahinter; eine Zeile, die nichts gezogen hat, bleibt
+    stehen wie zuvor. So werden Aufzaehlungen (Fixture d) und Adressbloecke
+    (Fixture c) NICHT durch neue Leerzeilen aufgetrennt, waehrend verbundene
+    Absaetze sauber getrennt sind. Ueberzaehlige Leerzeilen kollabiert
+    _clean_text danach.
+
+    Der offene Absatz (open_text) und prev laufen bewusst UEBER Seitengrenzen
+    weiter - so kann ein Absatz, der unten auf Seite N voll umbricht, oben auf
+    Seite N+1 fortgesetzt werden (Cross-Page-Join, Fixture h). Heading oder
+    Tabelle schliessen ihn (flush + prev=None)."""
+    geos = [_page_geometry(page) for page in pages_items]
+    doc_leading = _median([d for g in geos for d in g["deltas"]])
+    for g in geos:
+        if g["leading"] is None:
+            g["leading"] = doc_leading
+
     out = []
+    open_text = None      # aktuell offener Absatz (String) oder None
+    open_joined = False   # wurde in diesem Absatz mindestens einmal verbunden?
+    prev = None           # letzte Body-Zeile: {rec, page_idx, full, at_margin}
+
+    def flush():
+        nonlocal open_text, open_joined
+        if open_text is None:
+            return
+        if open_joined:
+            out.append("")
+            out.append(open_text)
+            out.append("")
+        else:
+            out.append(open_text)
+        open_text, open_joined = None, False
+
     for p_idx, page in enumerate(pages_items):
         tables = pages_tables[p_idx] if pages_tables else []
+        geo = geos[p_idx]
         emitted = set()
         for r in page:
             k = r.get("table")
             if k is not None:
+                flush()
+                prev = None
                 if k not in emitted:
                     emitted.add(k)
                     out.append("")
@@ -506,11 +710,24 @@ def _render_lines(pages_items, pages_tables=None):
                 continue
             level = r.get("heading")
             if level:
+                flush()
+                prev = None
                 out.append("")
                 out.append("#" * level + " " + r["text"].strip())
                 out.append("")
+                continue
+            # Body-Zeile: an den offenen Absatz anfuegen oder neu beginnen.
+            if (prev is not None and open_text is not None
+                    and _should_join(prev, r, geo, p_idx)):
+                open_text = _merge_join(open_text, r["text"])
+                open_joined = True
             else:
-                out.append(r["text"])
+                flush()
+                open_text = r["text"]
+            prev = {"rec": r, "page_idx": p_idx,
+                    "full": _line_full(r, geo),
+                    "at_margin": _line_at_margin(r, geo)}
+    flush()
     return out
 
 

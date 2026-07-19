@@ -58,15 +58,18 @@ def _w(text, font=BODY_FONT, size=BODY_SIZE):
 
 
 def _draw_par_justified(c, lines, y, font=BODY_FONT, size=BODY_SIZE,
-                        leading=LEADING):
+                        leading=LEADING, stretch_all=False):
     """Blocksatz-Absatz: jede Zeile ausser der letzten wird ueber den
-    Wortabstand exakt auf WIDTH gestreckt (beide Raender buendig)."""
+    Wortabstand exakt auf WIDTH gestreckt (beide Raender buendig).
+    stretch_all=True streckt AUCH die letzte Zeile - fuer einen Absatz, der
+    ueber die Seitengrenze weiterlaeuft (dann ist auch die unterste Zeile der
+    Seite vom Setzer umbrochen, nicht vom Autor beendet; Fixture h)."""
     for i, line in enumerate(lines):
         natural = _w(line, font, size)
         assert natural <= WIDTH + 0.5, f"Zeile breiter als Satzspiegel: {line!r}"
         t = c.beginText(LEFT, y)
         t.setFont(font, size)
-        if i < len(lines) - 1 and line.count(" "):
+        if (i < len(lines) - 1 or stretch_all) and line.count(" "):
             t.setWordSpace((WIDTH - natural) / line.count(" "))
         t.textOut(line)
         c.drawText(t)
@@ -475,6 +478,81 @@ def build_mehrseitig_pdf(path):
     c.save()
 
 
+# ---------------------------------------------------------------------------
+# FIXTURE h) ABSATZ UEBER DIE SEITENGRENZE (C4 Cross-Page-Join)
+# ---------------------------------------------------------------------------
+# Ein einziger Blocksatz-Absatz laeuft von Seite 1 auf Seite 2 weiter. Auf
+# Seite 1 ist er noch nicht zu Ende, deshalb sind dort ALLE Zeilen gestreckt
+# (auch die unterste - stretch_all=True). Die unterste Zeile von Seite 1 endet
+# ohne Satzschlusszeichen und voll am Justierungsrand; die oberste Zeile von
+# Seite 2 setzt klein fort. SOLL: der Absatz wird ueber die Seitengrenze hinweg
+# zu EINER Zeile verbunden (positiver Gegenpart zu g, wo NICHT genaeht wird).
+
+H_PAGE1 = [
+    "Der Jahresbericht schliesst mit einem laengeren Absatz, der bewusst so",
+    "umbrochen wurde, dass er am unteren Rand der ersten Seite noch nicht",
+]
+H_PAGE2 = [
+    "abgeschlossen ist und auf der zweiten Seite ohne einen neuen Absatz",
+    "einfach bis zum Ende weiterlaeuft.",
+]
+
+SOLL_H = [
+    "Der Jahresbericht schliesst mit einem laengeren Absatz, der bewusst so "
+    "umbrochen wurde, dass er am unteren Rand der ersten Seite noch nicht "
+    "abgeschlossen ist und auf der zweiten Seite ohne einen neuen Absatz "
+    "einfach bis zum Ende weiterlaeuft.",
+]
+
+
+def build_seitenumbruch_pdf(path):
+    from reportlab.pdfgen import canvas
+    c = canvas.Canvas(path, pagesize=A4_PT)
+    # Seite 1: Absatz laeuft weiter -> auch die letzte Zeile ist gestreckt.
+    _draw_par_justified(c, H_PAGE1, 780, stretch_all=True)
+    c.showPage()
+    # Seite 2: Fortsetzung, normaler Absatz (letzte Zeile ragged).
+    _draw_par_justified(c, H_PAGE2, 780)
+    c.showPage()
+    c.save()
+
+
+# ---------------------------------------------------------------------------
+# FIXTURE i) BLOCKSATZ-PUNKT-FALLE (C4 negative Absicherung des Bypass)
+# ---------------------------------------------------------------------------
+# Ein Blocksatz-Absatz, dessen ERSTE Zeile am geteilten Justierungsrand steht
+# UND auf einen Punkt endet. Der Blocksatz-Bypass darf NUR das schwache Signal
+# (Folgezeile klein) umgehen, niemals das starke (Satzschlusszeichen). SOLL:
+# die Punkt-Zeile wird NICHT mit der naechsten verbunden, obwohl sie voll am
+# Blocksatzrand sitzt; die zweite Zeile (voll, ohne Punkt) verbindet dagegen
+# ganz normal mit der dritten. Beweist: das starke Signal bleibt unangetastet.
+
+I_PAR = [
+    "Der erste Gedanke dieses Absatzes kommt hier am rechten Rand zum Ende.",
+    "Ein weiterer Gedanke fuellt die Zeile bis an den rechten Rand komplett",
+    "und schliesst den Absatz danach in einer letzten kurzen Zeile ab.",
+]
+
+SOLL_I = [
+    "Der erste Gedanke dieses Absatzes kommt hier am rechten Rand zum Ende.",
+    "",
+    "Ein weiterer Gedanke fuellt die Zeile bis an den rechten Rand komplett "
+    "und schliesst den Absatz danach in einer letzten kurzen Zeile ab.",
+]
+
+
+def build_blocksatz_punkt_pdf(path):
+    from reportlab.pdfgen import canvas
+    # Zeile 1 und 2 werden gestreckt (Nicht-Letzt-Zeilen), Zeile 3 bleibt
+    # ragged. Damit teilen sich Zeile 1 und 2 den Justierungsrand -> echter
+    # Blocksatz, und Zeile 1 endet trotzdem auf '.'.
+    assert I_PAR[0].rstrip().endswith("."), "Fixture i: Zeile 1 muss auf '.' enden"
+    c = canvas.Canvas(path, pagesize=A4_PT)
+    _draw_par_justified(c, I_PAR, 780)
+    c.showPage()
+    c.save()
+
+
 ALL_FIXTURES = [
     ("a_blocksatz", "struct_blocksatz.pdf", build_blocksatz_pdf, SOLL_A),
     ("b_flatter", "struct_flatter.pdf", build_flatter_pdf, SOLL_B),
@@ -483,6 +561,8 @@ ALL_FIXTURES = [
     ("e_misch", "struct_misch.pdf", build_misch_pdf, SOLL_E),
     ("f_zellen", "struct_zellen.pdf", build_zellen_pdf, SOLL_F),
     ("g_mehrseitig", "struct_mehrseitig.pdf", build_mehrseitig_pdf, None),
+    ("h_seitenumbruch", "struct_seitenumbruch.pdf", build_seitenumbruch_pdf, SOLL_H),
+    ("i_blocksatz_punkt", "struct_blocksatz_punkt.pdf", build_blocksatz_punkt_pdf, SOLL_I),
 ]
 
 
@@ -509,7 +589,8 @@ def _build_all():
 # und verlieren keinen Inhalt (Anker-Woerter vorhanden).
 
 _ANCHORS = {
-    "a_blocksatz": ["Silben-", "trennung", "E-", "Mail-Adresse"],
+    "a_blocksatz": ["Silbentrennung", "E-Mail-Adresse",
+                    "automatische Verarbeitung", "genannt wird"],
     "b_flatter": ["Flattersatz", "auseinandergezogen", "kurze Zeile"],
     "c_adresse": ["Beispiel & Partner GmbH", "Musterstrasse 12",
                   "44135 Dortmund", "Deutschland"],
@@ -518,6 +599,10 @@ _ANCHORS = {
                 E_CLOSE],
     "f_zellen": [F_INTRO, "Produkt A", "zweizeilig", F_CLOSE],
     "g_mehrseitig": ["Miete", "500", "Strom", "80", G_PAGE2_CLOSE],
+    "h_seitenumbruch": ["Der Jahresbericht schliesst",
+                        "einfach bis zum Ende weiterlaeuft."],
+    "i_blocksatz_punkt": ["Der erste Gedanke dieses Absatzes",
+                          "letzten kurzen Zeile ab."],
 }
 
 
@@ -612,37 +697,93 @@ def test_c2_misch_headings_exact():
 
 
 def test_c2_bold_word_in_body_never_heading():
-    """Die selbst gefundene Falle: 'deutlich' ist fett IM Fliesstext.
-    Die Zeile muss unveraendert und ohne #-Praefix im Output stehen."""
+    """Die selbst gefundene Falle: 'deutlich' ist fett IM Fliesstext und darf
+    nie zum Heading werden. Ab C4 steht der erste Absatz verbunden (SOLL_E),
+    das fette Wort also mitten in der verbundenen Absatz-Zeile."""
     r = _convert_fixture("e_misch")
     lines = r["output_text"].split("\n")
-    body_line = ("Das abgelaufene Geschaeftsjahr brachte der Gesellschaft "
-                 "ein deutlich")
+    body_line = ("Das abgelaufene Geschaeftsjahr brachte der Gesellschaft ein "
+                 "deutlich verbessertes Ergebnis, obwohl die Rahmenbedingungen "
+                 "im Kernmarkt weiterhin angespannt blieben und die Kosten "
+                 "spuerbar gestiegen sind.")
     assert body_line in lines, \
-        f"Fliesstext-Zeile mit fettem Wort fehlt oder wurde veraendert"
+        f"Verbundene Fliesstext-Zeile mit fettem Wort fehlt oder weicht ab"
     for h in (l for l in lines if l.startswith("#")):
         assert E_BOLD_WORD not in h, \
             f"Fettes Wort im Fliesstext wurde zum Heading: {h}"
 
 
-def test_c2_plain_fixtures_byte_identical():
-    """Fixtures a-d: exakt NULL Headings, Output byteidentisch zur
-    C1-Baseline (die Heading-Logik fasst diese Dokumente nicht an)."""
-    expected = {
-        "a_blocksatz": "\n".join(A_PAR1 + A_PAR2),
-        "b_flatter": "\n".join(B_PAR1 + B_PAR2),
-        "c_adresse": "\n".join(C_INTRO + C_ADDRESS + C_CLOSE),
-        "d_liste": "\n".join(D_LINES),
-    }
-    for key, want in expected.items():
-        try:
-            r = _convert_fixture(key)
-        except FixtureSkipped as e:
-            print(f"        SKIP {key}: {e}")
-            continue
-        assert r["output_text"] == want, (
-            f"{key}: Output weicht von der C1-Baseline ab:\n"
-            f"---IST---\n{r['output_text']}\n---SOLL---\n{want}")
+def _assert_soll(key, soll):
+    """Konvertiert ein Fixture und vergleicht den Output exakt mit seiner
+    SOLL-Struktur (Zeile fuer Zeile). Ersetzt ab C4 die alte C1-Baseline."""
+    try:
+        r = _convert_fixture(key)
+    except FixtureSkipped as e:
+        print(f"        SKIP {key}: {e}")
+        return
+    want = "\n".join(soll)
+    assert r["output_text"] == want, (
+        f"{key}: Output weicht vom SOLL ab:\n"
+        f"---IST---\n{r['output_text']}\n---SOLL---\n{want}")
+
+
+def test_c4_join_soll_abc():
+    """Fixtures a-c: umbrochene Zeilen werden nach der C4-Kernregel wieder zu
+    Absaetzen verbunden (Geometrie UND Text), exakt gemaess SOLL_A/B/C.
+    Ersetzt (zusammen mit test_c4_list_block_byte_identical) den frueheren
+    Byte-Identitaets-Test, dessen SOLL vor C4 galt."""
+    _assert_soll("a_blocksatz", SOLL_A)
+    _assert_soll("b_flatter", SOLL_B)
+    _assert_soll("c_adresse", SOLL_C)
+
+
+def test_c4_list_block_byte_identical():
+    """Fixture d: Aufzaehlung + Einleitung bleiben zeilenweise, Output
+    byteidentisch (kein Join, keine neue Leerzeile). Der Voll-Zeilen-Test und
+    das Listen-Marker-Veto halten C4 hier vollstaendig zurueck."""
+    _assert_soll("d_liste", SOLL_D)
+
+
+def test_c4_hyphenation_rules():
+    """Silbentrennung (Fixture a): weiche Trennung 'Silben-'+'trennung' wird zu
+    'Silbentrennung' (Bindestrich weg), das echte Bindestrich-Wort
+    'E-'+'Mail-Adresse' behaelt seinen Bindestrich. Der zerlegte Rohzustand
+    darf nirgends mehr auftauchen."""
+    r = _convert_fixture("a_blocksatz")
+    out = r["output_text"]
+    assert "Silbentrennung am Zeilenende" in out, out
+    assert "E-Mail-Adresse des Supports" in out, out
+    assert "Silben-" not in out, "weiche Silbentrennung nicht aufgeloest"
+    assert "zentrale E-\nMail" not in out, "Bindestrich-Wort falsch getrennt"
+
+
+def test_c4_crosspage_join():
+    """Fixture h: ein Absatz laeuft ueber die Seitengrenze und wird zu EINER
+    Zeile verbunden (Cross-Page-Join). Gegenpart zu g, wo NICHT genaeht wird."""
+    _assert_soll("h_seitenumbruch", SOLL_H)
+    r = _convert_fixture("h_seitenumbruch")
+    body = [l for l in r["output_text"].split("\n") if l.strip()]
+    assert len(body) == 1, f"Cross-Page-Absatz nicht zu einer Zeile verbunden: {body}"
+
+
+def test_c4_blocksatz_period_not_bypassed():
+    """Fixture i, die negative Absicherung des Blocksatz-Bypass: eine Zeile,
+    die voll am geteilten Justierungsrand sitzt UND auf '.' endet, wird NICHT
+    verbunden - das starke Textsignal (Satzschlusszeichen) wird in keinem
+    Regime umgangen. Die folgende volle Zeile ohne Punkt verbindet dagegen
+    normal (der Mechanismus arbeitet, nur das starke Signal stoppt ihn)."""
+    _assert_soll("i_blocksatz_punkt", SOLL_I)
+    lines = _convert_fixture("i_blocksatz_punkt")["output_text"].split("\n")
+    assert SOLL_I[0] in lines, \
+        "Punkt-Zeile am Blocksatzrand fehlt als eigene Zeile (faelschlich verbunden?)"
+    assert SOLL_I[2] in lines, "zweite/dritte Zeile nicht wie erwartet verbunden"
+
+
+def test_c4_misch_soll_exact():
+    """Fixture e komplett gegen SOLL_E: Titel/Abschnitte als Headings, beide
+    Absaetze verbunden, Pipe-Tabelle inline, Schlusssatz einzeln - alles in
+    Reihenfolge. Der End-zu-End-Beweis, dass C2, C3 und C4 zusammenspielen."""
+    _assert_soll("e_misch", SOLL_E)
 
 
 def test_c2_kapitel_headings_and_stripping_intact():
@@ -699,8 +840,10 @@ def test_c3_misch_pipe_table_flow():
         assert wanted in lines, f"Pipe-Zeile fehlt: {wanted}\n{lines}"
     order = [
         lines.index("## Kennzahlen und Ausblick"),
+        # ab C4 verbundener Absatz (SOLL_E), nicht mehr die einzelne Zeile
         lines.index("Die wichtigsten Kennzahlen der beiden letzten "
-                    "Geschaeftsjahre sind in der"),
+                    "Geschaeftsjahre sind in der folgenden Uebersicht "
+                    "zusammengefasst und kurz erlaeutert."),
         lines.index("| Kennzahl | 2024 | 2025 |"),
         lines.index("| --- | --- | --- |"),
         lines.index("| Umsatz in Mio Euro | 100 | 120 |"),
@@ -805,13 +948,18 @@ ALL_TESTS = [
     test_c2_line_records_match_extract_text,   # Fundament zuerst
     test_c2_misch_headings_exact,
     test_c2_bold_word_in_body_never_heading,
-    test_c2_plain_fixtures_byte_identical,
     test_c2_kapitel_headings_and_stripping_intact,
     test_c3_table_header_not_heading,
     test_c3_misch_pipe_table_flow,
     test_c3_no_cell_duplicates,
     test_c3_cell_robustness,
     test_c3_multipage_tables_not_stitched,
+    test_c4_join_soll_abc,
+    test_c4_list_block_byte_identical,
+    test_c4_hyphenation_rules,
+    test_c4_crosspage_join,
+    test_c4_blocksatz_period_not_bypassed,
+    test_c4_misch_soll_exact,
 ]
 
 if __name__ == "__main__":
