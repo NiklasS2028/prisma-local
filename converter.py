@@ -165,9 +165,11 @@ def _clean_text(text: str) -> str:
 
 
 def _rows_to_csv(rows) -> str:
-    """Wandelt eine Liste von Zeilen (Listen) in einen CSV-String um."""
+    """Wandelt eine Liste von Zeilen (Listen) in einen CSV-String um.
+    lineterminator=\\n wie alle uebrigen Exporte - der csv-Default \\r\\n
+    wuerde beim Textmodus-Schreiben in app.py zu \\r\\r\\n verdoppelt."""
     buf = io.StringIO()
-    writer = csv.writer(buf)
+    writer = csv.writer(buf, lineterminator="\n")
     for row in rows:
         # None-Zellen zu leerem String machen
         writer.writerow(["" if c is None else str(c).strip() for c in row])
@@ -1522,7 +1524,16 @@ def convert_file(path: str, add_xml: bool = False, target_model: str = None,
         before_method = before["method"]
 
     saved = before_count - after_clean["count"]
-    percent = (saved / before_count * 100) if before_count > 0 else 0.0
+    # OCR-Faelle: Bild-Seiten sind fuer Textmodelle nicht lesbar, ein
+    # Prozentvergleich waere Pseudo-Genauigkeit -> kein percent_saved;
+    # token_method beschreibt dann die Zaehlung des Ergebnisses.
+    # tokens_before bleibt als Schaetzgrundlage (Statistik) erhalten.
+    if is_ocr:
+        percent = None
+        method_out = after_clean["method"]
+    else:
+        percent = round((saved / before_count * 100) if before_count > 0 else 0.0, 1)
+        method_out = before_method
 
     # Ziel-Modell bestimmen (add_xml=True bleibt als Alias fuer Claude)
     if target_model is None:
@@ -1549,8 +1560,8 @@ def convert_file(path: str, add_xml: bool = False, target_model: str = None,
         "tokens_before": before_count,
         "tokens_after": after_clean["count"],   # bereinigt, ohne Wrapping
         "tokens_saved": saved,
-        "percent_saved": round(percent, 1),
-        "token_method": before_method,
+        "percent_saved": percent,
+        "token_method": method_out,
         "was_ocr": is_ocr,
         "target_model": target_model,
         "wrap_overhead": wrap_overhead,          # was das Wrapping extra kostet

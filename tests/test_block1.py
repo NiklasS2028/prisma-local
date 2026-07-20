@@ -217,7 +217,12 @@ def test_a_mixed_pdf_per_page_ocr():
     text_tokens = count_tokens("Quartalsbericht der Beispiel GmbH")["count"]
     assert r["tokens_before"] >= 2 * 1500 + text_tokens, \
         f"tokens_before ({r['tokens_before']}) enthaelt die Bildseiten-Schaetzung nicht"
-    assert r["token_method"] == "estimate", "Bild-Schaetzung muss als estimate deklariert sein"
+    # Block G1: OCR-Pfade liefern keinen Pseudo-Prozentvergleich mehr;
+    # token_method beschreibt die Zaehlung des ERGEBNISSES.
+    assert r["percent_saved"] is None, \
+        f"OCR darf keinen Pseudo-Prozentwert liefern: {r['percent_saved']}"
+    assert r["token_method"] == count_tokens("probe")["method"], \
+        "token_method muss die Ergebnis-Zaehlung beschreiben"
 
 
 def test_b_chapter_headings_protected():
@@ -410,6 +415,102 @@ def test_regression_full_image_pdf():
     assert r["was_ocr"] is True, "Bild-PDF wurde nicht als OCR-Fall erkannt"
     assert "2024" in r["output_text"], "OCR-Text fehlt"
     assert "BILD-PDF" in r["note"], f"Note kennzeichnet Bild-PDF nicht: {r['note']}"
+    # Block G1: reine Bild-PDF -> kein Pseudo-Prozentvergleich
+    assert r["percent_saved"] is None, \
+        f"OCR darf keinen Pseudo-Prozentwert liefern: {r['percent_saved']}"
+
+
+# ---------------------------------------------------------------------------
+# BLOCK G1: EINE TOKEN-METHODE PRO VERGLEICH
+# ---------------------------------------------------------------------------
+
+def test_g1_same_method_per_comparison():
+    """Block G1: Vorher/Nachher desselben Vergleichs nutzen EINE Methode.
+    Beleg pro Nicht-OCR-Dateityp-Pfad (txt, csv, xlsx, docx, pptx,
+    Text-PDF): beide Seiten laufen durch count_tokens, token_method
+    entspricht der global aktiven Methode."""
+    expected = count_tokens("probe")["method"]
+
+    txt_path = os.path.join(FIXTURES, "g1_probe.txt")
+    with open(txt_path, "w", encoding="utf-8") as f:
+        f.write("Zeile eins mit Inhalt.\nZeile zwei mit mehr Inhalt.")
+    csv_path = os.path.join(FIXTURES, "g1_probe.csv")
+    with open(csv_path, "w", encoding="utf-8") as f:
+        f.write("Name,Wert\nAlpha,1\nBeta,2\n")
+    xlsx_path = os.path.join(FIXTURES, "formeln.xlsx")
+    build_formula_xlsx(xlsx_path)
+    docx_path = os.path.join(FIXTURES, "reihenfolge.docx")
+    build_order_docx(docx_path)
+    pptx_path = os.path.join(FIXTURES, "notizen.pptx")
+    build_notes_pptx(pptx_path)
+    pdf_path = os.path.join(FIXTURES, "standard.pdf")
+    build_plain_text_pdf(pdf_path)
+
+    for path in (txt_path, csv_path, xlsx_path, docx_path, pptx_path, pdf_path):
+        r = convert_file(path)
+        assert r["ok"], f"{path}: {r.get('error')}"
+        assert r["was_ocr"] is False, f"{path}: unerwartet OCR"
+        assert r["token_method"] == expected, \
+            (f"{os.path.basename(path)}: token_method {r['token_method']}, "
+             f"erwartet {expected} (beide Seiten dieselbe Methode)")
+
+
+def test_g1_estimate_fallback_both_sides():
+    """Block G1: Ohne tiktoken fallen BEIDE Seiten gleichzeitig auf die
+    Schaetzung zurueck (len/4) - nie gemischt."""
+    import converter
+    txt_path = os.path.join(FIXTURES, "g1_fallback.txt")
+    content = "Zeile eins mit Inhalt.\nZeile zwei mit mehr Inhalt."
+    with open(txt_path, "w", encoding="utf-8") as f:
+        f.write(content)
+    orig_enc, orig_tried = converter._TIKTOKEN_ENC, converter._TIKTOKEN_TRIED
+    converter._TIKTOKEN_ENC, converter._TIKTOKEN_TRIED = None, True
+    try:
+        r = convert_file(txt_path, target_model="none")
+        assert r["ok"]
+        assert r["token_method"] == "estimate"
+        assert r["tokens_before"] == max(1, round(len(content) / 4)), \
+            "Vorher-Seite nutzt nicht die len/4-Schaetzung"
+        assert r["tokens_after"] == max(1, round(len(r["output_text"]) / 4)), \
+            "Nachher-Seite nutzt nicht die len/4-Schaetzung"
+    finally:
+        converter._TIKTOKEN_ENC, converter._TIKTOKEN_TRIED = orig_enc, orig_tried
+
+
+# ---------------------------------------------------------------------------
+# BLOCK G3: CSV-EXPORT OHNE \r\r-SEQUENZ
+# ---------------------------------------------------------------------------
+
+def test_g3_rows_to_csv_unified_newlines():
+    """Block G3: _rows_to_csv liefert \\n wie alle uebrigen Exporte - kein
+    \\r, das der Textmodus-Writer in app.py zu \\r\\r\\n verdoppeln wuerde."""
+    from converter import _rows_to_csv
+    text = _rows_to_csv([["a", "b"], ["c", "d"]])
+    assert "\r" not in text, f"CR im CSV-String: {text!r}"
+    assert text == "a,b\nc,d", f"Unerwartetes CSV: {text!r}"
+
+
+def test_g3_csv_export_no_crcrlf_bytes():
+    """Block G3: xlsx->CSV byte-genau ohne \\r\\r auf Platte. Der Schreibweg
+    ist identisch zu app.py /convert (Textmodus, utf-8, Windows uebersetzt
+    \\n -> \\r\\n)."""
+    import openpyxl
+    path = os.path.join(FIXTURES, "g3_export.xlsx")
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.append(["Name", "Wert"])
+    ws.append(["Alpha", 1])
+    ws.append(["Beta", 2])
+    wb.save(path)
+    r = convert_file(path)
+    assert r["ok"] and r["target_format"] == "csv"
+    out_path = os.path.join(FIXTURES, "g3_export_out.csv")
+    with open(out_path, "w", encoding="utf-8") as f:  # wie app.py:342
+        f.write(r["output_text"])
+    with open(out_path, "rb") as f:
+        data = f.read()
+    assert b"\r\r" not in data, f"\\r\\r-Sequenz in Datei-Bytes: {data[:80]!r}"
+    assert b"Alpha,1" in data, "Inhalt fehlt"
 
 
 # ---------------------------------------------------------------------------
@@ -428,6 +529,10 @@ ALL_TESTS = [
     test_image_hint_in_text_pdf,
     test_regression_plain_text_pdf,
     test_regression_full_image_pdf,
+    test_g1_same_method_per_comparison,
+    test_g1_estimate_fallback_both_sides,
+    test_g3_rows_to_csv_unified_newlines,
+    test_g3_csv_export_no_crcrlf_bytes,
 ]
 
 if __name__ == "__main__":

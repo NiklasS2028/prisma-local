@@ -196,6 +196,76 @@ def test_empty_state(page):
         "Null-Balken statt Empty-State"
 
 
+def _build_image_pdf(path):
+    """Reine Bild-PDF (eine Seite Text als Bild) fuer den OCR-Zaehl-Test."""
+    from PIL import Image, ImageDraw, ImageFont
+    from reportlab.pdfgen import canvas
+    from reportlab.lib.utils import ImageReader
+    img = Image.new("RGB", (1240, 1754), "white")
+    draw = ImageDraw.Draw(img)
+    try:
+        font = ImageFont.truetype("arial.ttf", 54)
+    except OSError:
+        font = ImageFont.load_default()
+    draw.text((100, 200), "OCR ZAEHLTEST 8888", fill="black", font=font)
+    c = canvas.Canvas(path, pagesize=(595.27, 841.89))
+    c.drawImage(ImageReader(img), 0, 0, width=595.27, height=841.89)
+    c.showPage()
+    c.save()
+
+
+def test_g_ocr_counts_zero_saved_tokens(page):
+    """Block G: OCR-Konvertierung zaehlt die Datei, aber 0 gesparte Tokens
+    (OCR spart nichts, es ermoeglicht). Nicht-OCR als Gegenprobe."""
+    server_reset()
+    pdf_path = os.path.join(FIXTURES, "g_ocr_zaehlung.pdf")
+    _build_image_pdf(pdf_path)
+    page.click("#tabConv")
+    page.set_input_files("#fileInput", pdf_path)
+    page.wait_for_selector(".result.show", timeout=90000)  # OCR braucht Zeit
+    page.click("#copyBtn")
+    page.wait_for_timeout(600)
+    s = server_stats()
+    assert s["files_converted"] == 1, "OCR-Datei wurde nicht gezaehlt"
+    assert s["tokens_saved_total"] == 0, \
+        f"OCR darf keine Token-Ersparnis zaehlen: {s['tokens_saved_total']}"
+    # Gegenprobe: Nicht-OCR-Ersparnis zaehlt weiterhin
+    txt_path = os.path.join(FIXTURES, "g_ocr_gegenprobe.txt")
+    with open(txt_path, "w", encoding="utf-8") as f:
+        f.write("Zeile mit Inhalt.   \n\n\n\n\n" * 30)  # viel Ballast
+    page.set_input_files("#fileInput", txt_path)
+    page.wait_for_selector(".result.show", timeout=10000)
+    page.click("#copyBtn")
+    page.wait_for_timeout(600)
+    s = server_stats()
+    assert s["files_converted"] == 2
+    assert s["tokens_saved_total"] > 0, "Nicht-OCR-Ersparnis fehlt (Gegenprobe)"
+
+
+def test_g2_pages_singular_plural(page):
+    """Block G2: '1 Seite' statt '1 Seiten' (EN: '1 page'), Plural bleibt."""
+    server_reset()
+    # 500 gesparte Tokens ~ genau 1 Seite
+    requests.post(BASE + "/stats/count_file", json={"saved_tokens": 500, "format": "txt"})
+    page.click("#tabStats")
+    page.wait_for_timeout(1200)
+    txt = page.locator("#statPages").inner_text()
+    assert "1 Seite" in txt, f"Seitenzeile fehlt: {txt}"
+    assert "1 Seiten" not in txt, f"Plural-Bug '1 Seiten': {txt}"
+    page.click('#langToggle .lang-btn[data-lang="en"]')
+    page.wait_for_timeout(400)
+    txt = page.locator("#statPages").inner_text()
+    assert "1 page" in txt and "1 pages" not in txt, f"EN-Plural-Bug: {txt}"
+    # Plural-Fall: 1000 Tokens ~ 2 Seiten
+    page.click('#langToggle .lang-btn[data-lang="de"]')
+    requests.post(BASE + "/stats/count_file", json={"saved_tokens": 500, "format": "txt"})
+    page.reload()
+    page.click("#tabStats")
+    page.wait_for_timeout(1200)
+    txt = page.locator("#statPages").inner_text()
+    assert "2 Seiten" in txt, f"Plural-Fall kaputt: {txt}"
+
+
 def test_weak_ranking_sorted(page):
     """F4: sieben Balken (auch input), absteigend sortiert, Zähler dran."""
     server_reset()
@@ -316,6 +386,8 @@ ALL_TESTS = [
     test_stats_tab_english,
     test_reset_two_step,
     test_empty_state,
+    test_g_ocr_counts_zero_saved_tokens,
+    test_g2_pages_singular_plural,
     test_weak_ranking_sorted,
     test_donut_and_best_score_removed,
     test_e2e_analyze_updates_ranking_live_does_not,
