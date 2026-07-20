@@ -543,7 +543,7 @@ def download_batch():
 def analyze():
     """
     Prompt-Trainer: Nimmt einen Prompt + Ziel-Modell entgegen und gibt die
-    Analyse (Score, Ampel, Checks, Vorlage) als JSON zurueck.
+    Analyse (Kriterienzahl, Ampel, Checks, Vorlage) als JSON zurueck.
     Laeuft komplett lokal - der Prompt verlaesst den Rechner nicht.
     """
     data = request.get_json(silent=True) or {}

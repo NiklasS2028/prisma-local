@@ -955,6 +955,7 @@
 
     <div style="margin: 14px 0 20px;">
       <button class="primary" id="analyzeBtn">Prompt analysieren</button>
+      <button class="ghost" id="clearBtn">Leeren</button>
     </div>
 
     <div class="status" id="ptStatus"></div>
@@ -968,11 +969,11 @@
           </svg>
           <div class="ring-center">
             <div class="score-big" id="scoreBig">0</div>
-            <div class="score-max" id="scoreMax">VON 100</div>
+            <div class="score-max" id="scoreMax">VON 7</div>
           </div>
         </div>
         <div class="score-text" id="scoreText"></div>
-        <div class="score-sub" id="scoreSub">Struktur-Punktzahl — regelbasiert, keine KI-Bewertung</div>
+        <div class="score-sub" id="scoreSub">0 von 7 Kriterien erfüllt — regelbasiert, keine KI-Bewertung</div>
       </div>
 
       <!-- Info-Box für das hinweis-Feld der Analyse (v1 zeigte es nie an) -->
@@ -1179,10 +1180,11 @@
       demoLabel: "Beispiel laden:",
       demoBtns: { weak: "schwach", medium: "mittel", strong: "stark" },
       analyzeBtn: "Prompt analysieren",
+      clearBtn: "Leeren",
       analyzing: "Analysiere …",
       emptyPrompt: "Bitte gib zuerst einen Prompt ein.",
-      scoreMax: "VON 100",
-      scoreSub: "Struktur-Punktzahl — regelbasiert, keine KI-Bewertung",
+      scoreMax: n => `VON ${n}`,
+      scoreSub: (x, n) => `${x} von ${n} Kriterien erfüllt — regelbasiert, keine KI-Bewertung`,
       optionalBadge: "optional",
       tplHead: "Deine verbesserte Vorlage",
       tplHint: 'Die <b>[Fragen in Klammern]</b> beantwortest du selbst und ersetzt sie durch deine Angaben — genau dabei lernst du, was einen guten Prompt ausmacht.',
@@ -1289,10 +1291,11 @@
       demoLabel: "Load example:",
       demoBtns: { weak: "weak", medium: "medium", strong: "strong" },
       analyzeBtn: "Analyze prompt",
+      clearBtn: "Clear",
       analyzing: "Analyzing …",
       emptyPrompt: "Please enter a prompt first.",
-      scoreMax: "OUT OF 100",
-      scoreSub: "Structure score — rule-based, no AI judgement",
+      scoreMax: n => `OF ${n}`,
+      scoreSub: (x, n) => `${x} of ${n} criteria met — rule-based, no AI judgement`,
       optionalBadge: "optional",
       tplHead: "Your improved template",
       tplHint: 'You answer the <b>[questions in brackets]</b> yourself and replace them with your details — that\'s exactly how you learn what makes a good prompt.',
@@ -1334,16 +1337,16 @@
   };
 
   // Sprachabhängige Demo-Prompts (identisch mit den Kalibrierungs-Referenzen
-  // in tests/test_block2.py: schwach=29/rot, mittel=48/gelb, stark=90/grün)
+  // in tests/test_block2.py: schwach=1/6 rot, mittel=3/6 gelb, stark=5/6 grün)
   const DEMOS = {
     de: {
       weak: "schreib mal irgendwas über hunde oder so",
-      medium: "Erklär mir Photosynthese für mein Studium",
+      medium: "Erklär mir Photosynthese für mein Studium in maximal 5 Sätzen",
       strong: "Du bist ein erfahrener Texter. Es geht um meinen Blog für Ersthundebesitzer. Schreibe einen Blogartikel über Leinentraining: maximal 600 Wörter, mit 3 Zwischenüberschriften und einer kurzen Checkliste am Ende."
     },
     en: {
       weak: "write some stuff about dogs or whatever",
-      medium: "Explain photosynthesis for my biology class",
+      medium: "Explain photosynthesis for my biology class in at most 5 sentences",
       strong: "You are an experienced copywriter. My goal is to help first-time dog owners with my blog. Write a blog post about leash training: maximum 600 words, with 3 subheadings and a short checklist at the end."
     }
   };
@@ -1389,8 +1392,11 @@
     document.querySelector('#demoStrong .demo-text').textContent = t.demoBtns.strong;
     setText('ptModelLabel', t.ptModelLabel);
     setText('analyzeBtn', t.analyzeBtn);
-    setText('scoreMax', t.scoreMax);
-    setText('scoreSub', t.scoreSub);
+    setText('clearBtn', t.clearBtn);
+    // Kriterien-Anzeige: letzte Analyse übernehmen, sonst Ruhezustand 0/7
+    const pt = lastPt || { met: 0, total: 7 };
+    setText('scoreMax', t.scoreMax(pt.total));
+    setText('scoreSub', t.scoreSub(pt.met, pt.total));
     setText('tplHead', t.tplHead);
     setHtml('tplHint', t.tplHint);
     setText('tplCopyBtn', t.tplCopyBtn);
@@ -1846,8 +1852,33 @@
   const ptStatus = document.getElementById('ptStatus');
   const ptResult = document.getElementById('ptResult');
   const RING_LEN = 439.8;  // Umfang des Rings (2*pi*70)
+  let lastPt = null;       // letzte Analyse {met, total} für Sprachwechsel
+  let liveTimer = null;    // Debounce der Live-Analyse
+  let ptSeq = 0;           // verwirft überholte Live-Antworten
 
-  document.getElementById('analyzeBtn').addEventListener('click', analyzePrompt);
+  document.getElementById('analyzeBtn').addEventListener('click', () => analyzePrompt(false));
+
+  // Live-Analyse: ~400 ms nach dem letzten Tastendruck, zählt NIE
+  // (der Analyze-Klick bleibt das einzige Zählsignal).
+  document.getElementById('promptInput').addEventListener('input', () => {
+    clearTimeout(liveTimer);
+    liveTimer = setTimeout(() => analyzePrompt(true), 400);
+  });
+
+  // Clear-Button: Eingabe + Ergebnis leeren, zählt nichts
+  document.getElementById('clearBtn').addEventListener('click', () => {
+    clearTimeout(liveTimer);
+    ptSeq++;  // laufende Live-Antwort verwerfen
+    const input = document.getElementById('promptInput');
+    input.value = '';
+    clearPtResult();
+    input.focus();
+  });
+
+  function clearPtResult() {
+    hideStatus(ptStatus);
+    ptResult.classList.remove('show');
+  }
 
   // Demo-Buttons: Beispiel-Prompt (in UI-Sprache) laden und direkt analysieren
   ['demoWeak', 'demoMedium', 'demoStrong'].forEach(id => {
@@ -1869,14 +1900,19 @@
     input.scrollIntoView({ behavior: 'smooth', block: 'center' });
   });
 
-  async function analyzePrompt() {
+  async function analyzePrompt(live) {
     const prompt = document.getElementById('promptInput').value;
     if (!prompt.trim()) {
-      showStatus(ptStatus, 'error', T().emptyPrompt);
+      // Leeres Feld: bei Live-Analyse Ergebnis still leeren (kein Flackern),
+      // beim Klick wie bisher ein Fehlerhinweis.
+      if (live) { clearPtResult(); } else { showStatus(ptStatus, 'error', T().emptyPrompt); }
       return;
     }
-    showStatus(ptStatus, 'loading', T().analyzing);
-    ptResult.classList.remove('show');
+    if (!live) {
+      showStatus(ptStatus, 'loading', T().analyzing);
+      ptResult.classList.remove('show');
+    }
+    const seq = ++ptSeq;
 
     try {
       const res = await fetch('/analyze_prompt', {
@@ -1889,33 +1925,41 @@
         })
       });
       const data = await res.json();
-      if (!data.ok) { showStatus(ptStatus, 'error', '⚠ ' + (data.error || T().analyzeError)); return; }
-      countPromptOnce(prompt, data);
-      renderPtResult(data);
+      if (live && seq !== ptSeq) return;  // inzwischen weitergetippt/geleert
+      if (!data.ok) { if (!live) showStatus(ptStatus, 'error', '⚠ ' + (data.error || T().analyzeError)); return; }
+      if (!live) countPromptOnce(prompt, data);  // nur der Klick zählt
+      renderPtResult(data, live);
     } catch (err) {
-      showStatus(ptStatus, 'error', T().connError);
+      if (!live) showStatus(ptStatus, 'error', T().connError);
     }
   }
 
-  function renderPtResult(d) {
+  function renderPtResult(d, live) {
     hideStatus(ptStatus);
+    const met = d.criteria_met;
+    const total = d.criteria_total;
+    lastPt = { met, total };
 
-    // Score-Zahl + Text
+    // Kriterienzahl + Text ("X von N Kriterien erfüllt")
     const big = document.getElementById('scoreBig');
     big.className = 'score-big ' + d.ampel;
-    countUp(big, d.score, 900);
+    if (live) { big.textContent = met; } else { countUp(big, met, 900); }
+    document.getElementById('scoreMax').textContent = T().scoreMax(total);
+    document.getElementById('scoreSub').textContent = T().scoreSub(met, total);
     document.getElementById('scoreText').textContent = d.ampel_text;
 
-    // Ring: erst leeren, dann im nächsten Frame auf Zielwert animieren
+    // Ring-Füllstand = X/N. Voll-Animation nur beim expliziten Klick;
+    // Live-Updates setzen den Wert direkt (kein Stroboskop).
     const ring = document.getElementById('ringFg');
     ring.className.baseVal = 'ring-fg ' + d.ampel;
+    const target = RING_LEN * (1 - (total ? met / total : 0));
     ring.style.transition = 'none';
-    ring.style.strokeDashoffset = RING_LEN;
+    ring.style.strokeDashoffset = (live || REDUCED) ? target : RING_LEN;
     void ring.getBoundingClientRect();
     ring.style.transition = '';
-    requestAnimationFrame(() => {
-      ring.style.strokeDashoffset = RING_LEN * (1 - d.score / 100);
-    });
+    if (!live && !REDUCED) {
+      requestAnimationFrame(() => { ring.style.strokeDashoffset = target; });
+    }
 
     // hinweis-Feld als Info-Box (v1 hat es nie angezeigt)
     const hintBox = document.getElementById('ptHinweis');
@@ -1941,7 +1985,9 @@
       const why = c.status < 1 ? `<div class="check-why">${escapeHtml(c.warum)}</div>` : '';
       const el = document.createElement('div');
       el.className = 'check';
-      el.style.animationDelay = (i * 70) + 'ms';
+      // Gestaffelte Einblendung nur beim Klick; live ohne Animation
+      if (live) { el.style.animation = 'none'; }
+      else { el.style.animationDelay = (i * 70) + 'ms'; }
       el.innerHTML = `
         <div class="check-head">
           <span class="dot ${dot}"></span>
@@ -1960,7 +2006,7 @@
     document.getElementById('tplSection').style.display = d.template ? '' : 'none';
 
     ptResult.classList.add('show');
-    ptResult.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    if (!live) ptResult.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }
 
   document.getElementById('tplCopyBtn').addEventListener('click', async () => {

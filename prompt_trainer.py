@@ -277,8 +277,10 @@ TEXTS = {
                           "Starte mit einem Verb: 'Erkläre…', 'Schreibe…', 'Erstelle…'"),
         "ampel": {
             "gruen": "Starker Prompt — gut strukturiert!",
-            "gelb": "Solide Basis — mit wenigen Ergänzungen wird er stark.",
-            "rot": "Braucht Arbeit — die Vorlage unten zeigt dir, was fehlt.",
+            "gelb": ("Teils gut — mehrere Kriterien fehlen noch. "
+                     "Die Vorlage unten schließt die Lücken."),
+            "rot": ("Braucht Arbeit — weniger als die Hälfte der Kriterien "
+                    "ist erfüllt. Die Vorlage unten zeigt dir, was fehlt."),
         },
         "checks": {
             "task": {
@@ -397,8 +399,10 @@ TEXTS = {
                           "Start with a verb: 'Explain…', 'Write…', 'Create…'"),
         "ampel": {
             "gruen": "Strong prompt — well structured!",
-            "gelb": "Solid base — a few additions will make it strong.",
-            "rot": "Needs work — the template below shows you what's missing.",
+            "gelb": ("Partly there — several criteria are still missing. "
+                     "The template below closes the gaps."),
+            "rot": ("Needs work — fewer than half of the criteria are met. "
+                    "The template below shows you what's missing."),
         },
         "checks": {
             "task": {
@@ -729,17 +733,28 @@ def _check_examples(text, words):
     return status, status
 
 
-# (id, gewicht, optional, funktion) - 'input' ist SITUATIV: erscheint nur,
+# (id, optional, funktion) - 'input' ist SITUATIV: erscheint nur,
 # wenn der Prompt ein Transformationsverb enthält.
 _CHECK_DEFS = [
-    ("task", 3.0, False, _check_task),
-    ("input", 2.0, False, _check_input),
-    ("context", 2.0, False, _check_context),
-    ("specificity", 2.0, False, _check_specificity),
-    ("format", 1.5, False, _check_format),
-    ("role", 1.0, True, _check_role),
-    ("examples", 1.0, True, _check_examples),
+    ("task", False, _check_task),
+    ("input", False, _check_input),
+    ("context", False, _check_context),
+    ("specificity", False, _check_specificity),
+    ("format", False, _check_format),
+    ("role", True, _check_role),
+    ("examples", True, _check_examples),
 ]
+
+
+def _ampel_for(met, total):
+    """Relative Farbregel über die GEPRÜFTEN Kriterien (Nenner 6 oder 7):
+    GRÜN wenn höchstens 1 Kriterium nicht erfüllt ist, ROT wenn weniger
+    als die Hälfte erfüllt ist, sonst GELB. 'Erfüllt' = Status 1.0."""
+    if total - met <= 1:
+        return "gruen"
+    if met < total / 2:
+        return "rot"
+    return "gelb"
 
 
 # ---------------------------------------------------------------------------
@@ -825,7 +840,8 @@ def _build_template(prompt, by_id, model, tpl_lang):
 def analyze_prompt(prompt: str, model: str = "claude", ui_lang: str = "de") -> dict:
     """
     Analysiert einen Prompt und gibt zurück:
-      ok, score (0-100), ampel ('gruen'/'gelb'/'rot'), ampel_text,
+      ok, criteria_met / criteria_total (erfüllte / geprüfte Kriterien),
+      ampel ('gruen'/'gelb'/'rot'), ampel_text,
       checks (Liste mit Status + Erklärungen in ui_lang),
       template (Vorlage in der ERKANNTEN Prompt-Sprache),
       model, prompt_lang ('de'/'en'), ggf. hinweis (bei fast-leerem Prompt)
@@ -845,11 +861,13 @@ def analyze_prompt(prompt: str, model: str = "claude", ui_lang: str = "de") -> d
     prompt_lang = _detect_lang(prompt, default=ui_lang)
     domain = _detect_domain(text)
 
-    # Sonderfall: praktisch leerer Prompt
+    # Sonderfall: praktisch leerer Prompt. criteria_total = 6, weil ohne
+    # Transformationsverb die sechs Standard-Kriterien geprüft würden.
     if words < 2:
         return {
             "ok": True,
-            "score": 0,
+            "criteria_met": 0,
+            "criteria_total": 6,
             "ampel": "rot",
             "ampel_text": t["empty_ampel_text"],
             "checks": [],
@@ -863,30 +881,23 @@ def analyze_prompt(prompt: str, model: str = "claude", ui_lang: str = "de") -> d
     is_transform = bool(_TRANSFORM_RX.search(text))
 
     results = []
-    for check_id, gewicht, optional, fn in _CHECK_DEFS:
+    for check_id, optional, fn in _CHECK_DEFS:
         if check_id == "input" and not is_transform:
             continue
         status, fb_key = fn(text, words)
         results.append({
             "id": check_id,
-            "gewicht": gewicht,
             "optional": optional,
             "status": status,
             "fb_key": fb_key,
         })
     by_id = {r["id"]: r for r in results}
 
-    # Score: gewichteter Anteil
-    total_weight = sum(r["gewicht"] for r in results)
-    achieved = sum(r["gewicht"] * r["status"] for r in results)
-    score = round(achieved / total_weight * 100)
-
-    if score >= 75:
-        ampel = "gruen"
-    elif score >= 45:
-        ampel = "gelb"
-    else:
-        ampel = "rot"
+    # Kriterienzahl statt Prozent-Score: erfüllt = Status 1.0; ein nicht
+    # geprüftes 'input' zählt weder als erfüllt noch als gerissen.
+    met = sum(1 for r in results if r["status"] >= 1.0)
+    total = len(results)
+    ampel = _ampel_for(met, total)
 
     # Für die Anzeige: Texte in ui_lang, Beispiele domänenpassend
     checks_out = []
@@ -913,7 +924,8 @@ def analyze_prompt(prompt: str, model: str = "claude", ui_lang: str = "de") -> d
 
     return {
         "ok": True,
-        "score": score,
+        "criteria_met": met,
+        "criteria_total": total,
         "ampel": ampel,
         "ampel_text": t["ampel"][ampel],
         "checks": checks_out,

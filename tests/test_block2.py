@@ -14,7 +14,9 @@ Prompt-Trainer-Audit ab:
   - move_tip gegen Rolle/Kontext-Dopplung
   - Korrigiertes Rollen-Beispiel mit "[dein Text]"
   - hinweis-Feld bei fast-leerem Prompt
-  - Kalibrierung: schwach 29/rot, mittel 48/gelb, stark 90/grün
+  - Kriterienzahl (Block E): criteria_met/criteria_total statt 0-100-Score,
+    Nenner 6 ohne / 7 mit Transformationsverb, relative Farbregel
+  - Kalibrierung: schwach 1/6 rot, mittel 3/6 gelb, stark 5/6 grün
 
 Aufruf:  python tests/test_block2.py
 """
@@ -35,7 +37,7 @@ def get_check(result, check_id):
 # --- Referenz-Prompts für die Kalibrierung (= Demo-Buttons in Block 3) ---
 DEMO_DE = {
     "weak": "schreib mal irgendwas über hunde oder so",
-    "medium": "Erklär mir Photosynthese für mein Studium",
+    "medium": "Erklär mir Photosynthese für mein Studium in maximal 5 Sätzen",
     "strong": ("Du bist ein erfahrener Texter. Es geht um meinen Blog für "
                "Ersthundebesitzer. Schreibe einen Blogartikel über "
                "Leinentraining: maximal 600 Wörter, mit 3 Zwischenüberschriften "
@@ -43,7 +45,7 @@ DEMO_DE = {
 }
 DEMO_EN = {
     "weak": "write some stuff about dogs or whatever",
-    "medium": "Explain photosynthesis for my biology class",
+    "medium": "Explain photosynthesis for my biology class in at most 5 sentences",
     "strong": ("You are an experienced copywriter. My goal is to help "
                "first-time dog owners with my blog. Write a blog post about "
                "leash training: maximum 600 words, with 3 subheadings and a "
@@ -257,7 +259,7 @@ def test_no_good_example_teaches_input_mistake():
 def test_hinweis_on_near_empty_prompt():
     r = analyze_prompt("Hunde", "claude")
     assert r["ok"] is True
-    assert r["score"] == 0 and r["ampel"] == "rot"
+    assert r["criteria_met"] == 0 and r["ampel"] == "rot"
     assert r.get("hinweis"), "hinweis-Feld fehlt bei fast-leerem Prompt"
     assert r["template"] == "", "Vorlage muss bei fast-leerem Prompt leer sein"
 
@@ -274,24 +276,66 @@ def test_signature_defaults():
 
 
 # ---------------------------------------------------------------------------
-# KALIBRIERUNG (Zielwerte ca. 29 / 48 / 90)
+# KRITERIENZAHL UND FARBREGEL (Block E)
 # ---------------------------------------------------------------------------
 
+def test_no_score_field():
+    """Der 0-100-Score ist ersatzlos entfallen (Design-Entscheidung 1)."""
+    r = analyze_prompt(DEMO_DE["strong"], "claude")
+    assert "score" not in r, "Alter score-Schlüssel taucht wieder auf"
+    assert "criteria_met" in r and "criteria_total" in r
+
+
+def test_denominator_without_transform():
+    """Ohne Transformationsverb: 6 geprüfte Kriterien (kein input-Check)."""
+    r = analyze_prompt("Schreibe ein Gedicht über den Herbst.", "claude")
+    assert r["criteria_total"] == 6, f"Nenner: {r['criteria_total']}"
+    assert get_check(r, "input") is None
+
+
+def test_denominator_with_transform():
+    """Mit Transformationsverb: 7 geprüfte Kriterien (input-Check dabei)."""
+    r = analyze_prompt("Verbessere diesen Text.", "claude")
+    assert r["criteria_total"] == 7, f"Nenner: {r['criteria_total']}"
+    assert get_check(r, "input") is not None
+
+
+def test_color_rule_boundaries():
+    """Relative Farbregel: GRÜN wenn höchstens 1 nicht erfüllt, ROT wenn
+    weniger als die Hälfte erfüllt, sonst GELB - für beide Nenner."""
+    from prompt_trainer import _ampel_for
+    assert _ampel_for(5, 6) == "gruen"
+    assert _ampel_for(6, 6) == "gruen"
+    assert _ampel_for(6, 7) == "gruen"
+    assert _ampel_for(7, 7) == "gruen"
+    assert _ampel_for(2, 6) == "rot"
+    assert _ampel_for(3, 7) == "rot"
+    assert _ampel_for(0, 6) == "rot"
+    assert _ampel_for(4, 6) == "gelb"
+    assert _ampel_for(3, 6) == "gelb"
+    assert _ampel_for(5, 7) == "gelb"
+    assert _ampel_for(4, 7) == "gelb"
+
+
 def _assert_calibration(demos, lang):
+    """Demo-Prompts unter der Kriterien-Regel: schwach 1/6 rot,
+    mittel 3/6 gelb (task/specificity/format erfüllt, context 0.5),
+    stark 5/6 grün (nur examples fehlt; alle ohne Transformationsverb
+    -> Nenner 6)."""
     r_weak = analyze_prompt(demos["weak"], "claude")
     r_med = analyze_prompt(demos["medium"], "claude")
     r_strong = analyze_prompt(demos["strong"], "claude")
-    assert r_weak["ampel"] == "rot", \
-        f"[{lang}] schwach: erwartet rot, bekam {r_weak['ampel']} ({r_weak['score']})"
-    assert r_med["ampel"] == "gelb", \
-        f"[{lang}] mittel: erwartet gelb, bekam {r_med['ampel']} ({r_med['score']})"
-    assert r_strong["ampel"] == "gruen", \
-        f"[{lang}] stark: erwartet gruen, bekam {r_strong['ampel']} ({r_strong['score']})"
-    assert abs(r_weak["score"] - 29) <= 5, f"[{lang}] schwach: {r_weak['score']} (Ziel ~29)"
-    assert abs(r_med["score"] - 48) <= 5, f"[{lang}] mittel: {r_med['score']} (Ziel ~48)"
-    assert abs(r_strong["score"] - 90) <= 5, f"[{lang}] stark: {r_strong['score']} (Ziel ~90)"
-    print(f"        [{lang}] Scores: schwach={r_weak['score']}, "
-          f"mittel={r_med['score']}, stark={r_strong['score']}")
+    for name, r, met, ampel in (("schwach", r_weak, 1, "rot"),
+                                ("mittel", r_med, 3, "gelb"),
+                                ("stark", r_strong, 5, "gruen")):
+        assert r["criteria_total"] == 6, \
+            f"[{lang}] {name}: Nenner {r['criteria_total']}, erwartet 6"
+        assert r["criteria_met"] == met, \
+            f"[{lang}] {name}: {r['criteria_met']} erfüllt, erwartet {met}"
+        assert r["ampel"] == ampel, \
+            f"[{lang}] {name}: erwartet {ampel}, bekam {r['ampel']}"
+    print(f"        [{lang}] Kriterien: schwach={r_weak['criteria_met']}/6, "
+          f"mittel={r_med['criteria_met']}/6, stark={r_strong['criteria_met']}/6")
 
 
 def test_calibration_de():
@@ -331,6 +375,10 @@ ALL_TESTS = [
     test_hinweis_on_near_empty_prompt,
     test_empty_prompt_error,
     test_signature_defaults,
+    test_no_score_field,
+    test_denominator_without_transform,
+    test_denominator_with_transform,
+    test_color_rule_boundaries,
     test_calibration_de,
     test_calibration_en,
 ]

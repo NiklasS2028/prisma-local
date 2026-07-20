@@ -7,7 +7,12 @@ Server auf http://localhost:8770. Vorher starten:  python app.py
 
 Geprüft wird:
   - Sprach-Toggle DE/EN inkl. localStorage-Persistenz (kiw_lang)
-  - Demo-Buttons (schwach/mittel/stark, sprachabhängig, Kalibrierung 29/48/90)
+  - Demo-Buttons (schwach/mittel/stark, sprachabhängig; Kriterien-Anzeige
+    schwach 1/6 rot, mittel 3/6 gelb, stark 5/6 grün)
+  - "X von N": Nenner 6 ohne / 7 mit Transformationsverb
+  - Clear-Button leert Eingabe + Ergebnis, ohne zu zählen
+  - Live-Analyse aktualisiert die Anzeige OHNE Stats-Request
+    (Request-Mitschnitt); leeres Feld leert das Ergebnis
   - hinweis-Info-Box bei "Hunde" + verstecktem Vorlagen-Bereich
   - Re-Analyse-Button "In Eingabe übernehmen"
   - ui_lang wird an /analyze_prompt geschickt (englische Check-Titel)
@@ -20,6 +25,8 @@ Aufruf:  python tests/test_block3_dom.py
 import os
 import sys
 import traceback
+
+import requests
 
 BASE = "http://localhost:8770"
 FIXTURES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures")
@@ -75,17 +82,90 @@ def test_jargon_free_gpt_hint(page):
 
 
 def test_demo_buttons_calibration(page):
+    """Kriterien-Regel: schwach 1/6 rot, mittel 3/6 gelb, stark 5/6 grün.
+    Alle drei Demos ohne Transformationsverb -> Nenner 6."""
     page.click('#tabTrainer')
-    expected = {"demoWeak": ("29", "rot"), "demoMedium": ("48", "gelb"),
-                "demoStrong": ("90", "gruen")}
-    for btn_id, (score, ampel) in expected.items():
+    expected = {"demoWeak": ("1", "rot"), "demoMedium": ("3", "gelb"),
+                "demoStrong": ("5", "gruen")}
+    for btn_id, (met, ampel) in expected.items():
         page.click(f"#{btn_id}")
         page.wait_for_selector(".pt-result.show", timeout=5000)
         page.wait_for_timeout(1200)  # countUp-Animation abwarten
-        got_score = page.locator("#scoreBig").inner_text()
+        got_met = page.locator("#scoreBig").inner_text()
         got_class = page.locator("#scoreBig").get_attribute("class")
-        assert got_score == score, f"{btn_id}: Score {got_score}, erwartet {score}"
+        assert got_met == met, f"{btn_id}: {got_met} erfüllt, erwartet {met}"
         assert ampel in got_class, f"{btn_id}: Ampel-Klasse '{got_class}', erwartet {ampel}"
+        assert page.locator("#scoreMax").inner_text() == "VON 6", \
+            f"{btn_id}: Nenner-Anzeige '{page.locator('#scoreMax').inner_text()}'"
+    sub = page.locator("#scoreSub").inner_text()
+    assert "5 von 6 Kriterien erfüllt" in sub, f"Kriterien-Beschriftung: {sub}"
+
+
+def test_denominator_seven_with_transform(page):
+    """Transformationsprompt -> 7 geprüfte Kriterien in der Anzeige."""
+    page.click('#tabTrainer')
+    page.fill("#promptInput", "Verbessere diesen Text.")
+    page.click("#analyzeBtn")
+    page.wait_for_selector(".pt-result.show", timeout=5000)
+    page.wait_for_timeout(1200)
+    assert page.locator("#scoreMax").inner_text() == "VON 7", \
+        f"Nenner-Anzeige: {page.locator('#scoreMax').inner_text()}"
+    assert "von 7 Kriterien" in page.locator("#scoreSub").inner_text()
+
+
+def test_clear_button_clears_without_counting(page):
+    """E2: Clear leert Eingabe + Ergebnis und zählt nichts."""
+    requests.post(BASE + "/stats/reset", timeout=10)
+    page.click('#tabTrainer')
+    page.click("#demoWeak")
+    page.wait_for_selector(".pt-result.show", timeout=5000)
+    before = requests.get(BASE + "/stats", timeout=10).json()["prompts_analyzed"]
+    page.click("#clearBtn")
+    assert page.locator("#promptInput").input_value() == "", "Eingabe nicht geleert"
+    assert not page.locator(".pt-result.show").count(), "Ergebnis nicht geleert"
+    page.wait_for_timeout(600)
+    after = requests.get(BASE + "/stats", timeout=10).json()["prompts_analyzed"]
+    assert after == before, "Clear-Button hat gezählt"
+    # EN-Label
+    page.click('#langToggle .lang-btn[data-lang="en"]')
+    assert page.locator("#clearBtn").inner_text() == "Clear"
+    page.click('#langToggle .lang-btn[data-lang="de"]')
+    assert page.locator("#clearBtn").inner_text() == "Leeren"
+
+
+def test_live_analysis_updates_without_stats_request(page):
+    """E4: Tippen aktualisiert die Anzeige nach ~400 ms Debounce, schickt
+    aber KEINEN Stats-Request; erst der Analyze-Klick zählt."""
+    requests.post(BASE + "/stats/reset", timeout=10)
+    page.click('#tabTrainer')
+    counted = []
+    page.on("request",
+            lambda req: counted.append(req.url)
+            if "/stats/count_prompt" in req.url else None)
+    page.fill("#promptInput", "Erklär mir Photosynthese für mein Studium")
+    page.wait_for_selector(".pt-result.show", timeout=5000)
+    page.wait_for_timeout(400)
+    assert page.locator("#scoreBig").inner_text() == "1", "Live-Anzeige fehlt"
+    assert counted == [], f"Live-Analyse hat Stats-Requests geschickt: {counted}"
+    assert requests.get(BASE + "/stats", timeout=10).json()["prompts_analyzed"] == 0
+    # Der Klick ist das einzige Zählsignal
+    page.click("#analyzeBtn")
+    page.wait_for_timeout(800)
+    assert len(counted) == 1, f"Analyze-Klick: {len(counted)} Requests statt 1"
+    assert requests.get(BASE + "/stats", timeout=10).json()["prompts_analyzed"] == 1
+
+
+def test_live_analysis_empty_field_clears(page):
+    """E4: Feld leeren -> Ergebnis verschwindet ohne Fehlermeldung."""
+    page.click('#tabTrainer')
+    page.fill("#promptInput", "Erklär mir Photosynthese für mein Studium")
+    page.wait_for_selector(".pt-result.show", timeout=5000)
+    page.fill("#promptInput", "")
+    page.wait_for_timeout(700)
+    assert not page.locator(".pt-result.show").count(), \
+        "Ergebnis bleibt trotz leerem Feld stehen"
+    assert not page.locator("#ptStatus.show").count(), \
+        "Fehlermeldung flackert bei leerem Feld während Live-Analyse"
 
 
 def test_demo_buttons_language_dependent(page):
@@ -149,14 +229,14 @@ def test_reanalyze_check1_template_roundtrip(page):
 
 
 def test_reanalyze_check2_learning_loop_improves_score(page):
-    """Re-Analyse-Check 2: Die Lernschleife wirkt. Schwacher Prompt (29/rot)
+    """Re-Analyse-Check 2: Die Lernschleife wirkt. Schwacher Prompt (1/6 rot)
     -> Vorlage übernehmen -> Platzhalter ausfüllen (wie ein Nutzer es täte)
-    -> erneut analysieren -> Score springt auf grün (90)."""
+    -> erneut analysieren -> Anzeige springt auf grün (5/6)."""
     page.click('#tabTrainer')
     page.click("#demoWeak")
     page.wait_for_selector(".pt-result.show", timeout=5000)
     page.wait_for_timeout(1200)
-    assert page.locator("#scoreBig").inner_text() == "29", "Ausgangsscore nicht 29"
+    assert page.locator("#scoreBig").inner_text() == "1", "Ausgangswert nicht 1/6"
     page.click("#reanalyzeBtn")
     assert "<task>" in page.locator("#promptInput").input_value(), "Vorlage fehlt in der Eingabe"
     # Nutzer füllt die [Platzhalter-Fragen] aus und konkretisiert die Aufgabe
@@ -172,9 +252,9 @@ def test_reanalyze_check2_learning_loop_improves_score(page):
     page.click("#analyzeBtn")
     page.wait_for_selector(".pt-result.show", timeout=5000)
     page.wait_for_timeout(1200)
-    score = int(page.locator("#scoreBig").inner_text())
+    met = int(page.locator("#scoreBig").inner_text())
     klass = page.locator("#scoreBig").get_attribute("class")
-    assert score >= 75, f"Lernschleife hebt den Score nicht auf grün (Score {score})"
+    assert met >= 5, f"Lernschleife hebt die Kriterienzahl nicht (nur {met} erfüllt)"
     assert "gruen" in klass, f"Ampel nicht grün: {klass}"
 
 
@@ -205,6 +285,10 @@ ALL_TESTS = [
     test_universal_label,
     test_jargon_free_gpt_hint,
     test_demo_buttons_calibration,
+    test_denominator_seven_with_transform,
+    test_clear_button_clears_without_counting,
+    test_live_analysis_updates_without_stats_request,
+    test_live_analysis_empty_field_clears,
     test_demo_buttons_language_dependent,
     test_hinweis_box_and_hidden_template,
     test_reanalyze_button,

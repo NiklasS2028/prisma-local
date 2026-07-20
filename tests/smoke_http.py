@@ -36,7 +36,8 @@ def test_analyze_de():
         "model": "claude", "ui_lang": "de"})
     d = r.json()
     assert r.status_code == 200 and d["ok"]
-    assert d["score"] == 29 and d["ampel"] == "rot", f"Kalibrierung: {d['score']}/{d['ampel']}"
+    assert d["criteria_met"] == 1 and d["criteria_total"] == 6 and d["ampel"] == "rot", \
+        f"Kalibrierung: {d.get('criteria_met')}/{d.get('criteria_total')}/{d['ampel']}"
     assert d["prompt_lang"] == "de"
 
 
