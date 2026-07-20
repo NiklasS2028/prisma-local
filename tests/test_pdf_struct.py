@@ -33,7 +33,7 @@ if hasattr(sys.stdout, "reconfigure"):
 # converter.py liegt eine Ebene hoeher
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from converter import convert_file  # noqa: E402
+from converter import convert_file, _structure_note  # noqa: E402
 
 FIXTURES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures")
 os.makedirs(FIXTURES, exist_ok=True)
@@ -786,6 +786,37 @@ def test_c4_misch_soll_exact():
     _assert_soll("e_misch", SOLL_E)
 
 
+def test_c4_structure_note_plural_singular():
+    """Die Struktur-Note beziffert Ueberschriften/Tabellen/Umbrueche mit
+    korrektem Numerus. Der Singular-Fall ist der eigentliche Regressionsschutz
+    (der alte '1 Seiten'-Fehlertyp wuerde '1 Ueberschriften' erzeugen).
+    Zaehler mit 0 tauchen nie auf."""
+    assert _structure_note(3, 1, 3) == (
+        "3 Überschriften erkannt, 1 Tabelle übernommen, "
+        "3 Zeilenumbrüche zu Absätzen verbunden.")
+    assert _structure_note(1, 1, 1) == (
+        "1 Überschrift erkannt, 1 Tabelle übernommen, "
+        "1 Zeilenumbruch zu einem Absatz verbunden.")
+    assert _structure_note(0, 0, 0) == "", "0/0/0 muss leer bleiben"
+    assert _structure_note(0, 2, 0) == "2 Tabellen übernommen.", \
+        "nur Zaehler > 0 nennen"
+
+
+def test_c4_structure_note_in_pdf():
+    """Die Note landet real im Konvertierungsergebnis: e_misch mit Plural
+    (Ueberschriften, Umbrueche) und Singular (1 Tabelle), i_blocksatz_punkt mit
+    Singular-Umbruch, d_liste (0/0/0) ohne jede Struktur-Bezifferung."""
+    r_e = _convert_fixture("e_misch")
+    assert ("3 Überschriften erkannt, 1 Tabelle übernommen, "
+            "3 Zeilenumbrüche zu Absätzen verbunden.") in r_e["note"], r_e["note"]
+    r_i = _convert_fixture("i_blocksatz_punkt")
+    assert "1 Zeilenumbruch zu einem Absatz verbunden." in r_i["note"], r_i["note"]
+    r_d = _convert_fixture("d_liste")
+    for w in ("Überschrift", "Tabelle", "Zeilenumbruch"):
+        assert w not in r_d["note"], \
+            f"Simple Liste sollte keine Struktur-Note tragen: {r_d['note']}"
+
+
 def test_c2_kapitel_headings_and_stripping_intact():
     """Echte Mehrseiten-PDF (kapitel.pdf): 'Kapitel 1'-'Kapitel 5' werden
     genau EINE Ebene (#), Kopf-/Fusszeilen-Entfernung arbeitet unveraendert,
@@ -960,6 +991,8 @@ ALL_TESTS = [
     test_c4_crosspage_join,
     test_c4_blocksatz_period_not_bypassed,
     test_c4_misch_soll_exact,
+    test_c4_structure_note_plural_singular,
+    test_c4_structure_note_in_pdf,
 ]
 
 if __name__ == "__main__":

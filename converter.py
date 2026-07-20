@@ -205,6 +205,32 @@ def _removed_note(removed_lines, max_show=4):
     return f" Entfernt: {shown}{more}."
 
 
+def _plural(n, one, many):
+    """Deutsche Anzeige-Zahl mit korrektem Numerus: '1 Ueberschrift' vs
+    '3 Ueberschriften'. one/many sind die kompletten Wortgruppen, damit auch
+    Faelle mit veraendertem Innenteil passen ('1 Zeilenumbruch zu einem
+    Absatz verbunden' vs 'K Zeilenumbrueche zu Absaetzen verbunden')."""
+    return f"{n} {one if n == 1 else many}"
+
+
+def _structure_note(n_headings, n_tables, n_joins):
+    """Beziffert die geleistete Strukturarbeit fuer die Anzeige-Note (Block C).
+    Nur Zaehler > 0 werden genannt, damit die Note bei einfachen PDFs nicht
+    unnoetig laenger wird (0/0/0 -> leerer String). Deutsch-only wie alle
+    Notes; die Note wird roh angezeigt (siehe offener Punkt in CLAUDE.md)."""
+    parts = []
+    if n_headings > 0:
+        parts.append(_plural(n_headings, "Überschrift erkannt",
+                             "Überschriften erkannt"))
+    if n_tables > 0:
+        parts.append(_plural(n_tables, "Tabelle übernommen",
+                             "Tabellen übernommen"))
+    if n_joins > 0:
+        parts.append(_plural(n_joins, "Zeilenumbruch zu einem Absatz verbunden",
+                             "Zeilenumbrüche zu Absätzen verbunden"))
+    return ", ".join(parts) + "." if parts else ""
+
+
 def _strip_repeating_headers_footers(pages_lines, key=None):
     """
     Entfernt Zeilen, die auf vielen Seiten identisch wiederkehren
@@ -669,7 +695,10 @@ def _render_lines(pages_items, pages_tables=None):
     Der offene Absatz (open_text) und prev laufen bewusst UEBER Seitengrenzen
     weiter - so kann ein Absatz, der unten auf Seite N voll umbricht, oben auf
     Seite N+1 fortgesetzt werden (Cross-Page-Join, Fixture h). Heading oder
-    Tabelle schliessen ihn (flush + prev=None)."""
+    Tabelle schliessen ihn (flush + prev=None).
+
+    Rueckgabe: (zeilen, stats) mit stats={"joins","tables"} fuer die
+    Struktur-Note (wie viele Umbrueche verbunden, wie viele Tabellen emittiert)."""
     geos = [_page_geometry(page) for page in pages_items]
     doc_leading = _median([d for g in geos for d in g["deltas"]])
     for g in geos:
@@ -677,6 +706,8 @@ def _render_lines(pages_items, pages_tables=None):
             g["leading"] = doc_leading
 
     out = []
+    n_joins = 0           # verbundene Umbrueche (fuer die Struktur-Note)
+    n_tables = 0          # emittierte Pipe-Tabellen (fuer die Struktur-Note)
     open_text = None      # aktuell offener Absatz (String) oder None
     open_joined = False   # wurde in diesem Absatz mindestens einmal verbunden?
     prev = None           # letzte Body-Zeile: {rec, page_idx, full, at_margin}
@@ -704,6 +735,7 @@ def _render_lines(pages_items, pages_tables=None):
                 prev = None
                 if k not in emitted:
                     emitted.add(k)
+                    n_tables += 1
                     out.append("")
                     out.extend(_pipe_table(tables[k]["rows"]))
                     out.append("")
@@ -721,6 +753,7 @@ def _render_lines(pages_items, pages_tables=None):
                     and _should_join(prev, r, geo, p_idx)):
                 open_text = _merge_join(open_text, r["text"])
                 open_joined = True
+                n_joins += 1
             else:
                 flush()
                 open_text = r["text"]
@@ -728,7 +761,7 @@ def _render_lines(pages_items, pages_tables=None):
                     "full": _line_full(r, geo),
                     "at_margin": _line_at_margin(r, geo)}
     flush()
-    return out
+    return out, {"joins": n_joins, "tables": n_tables}
 
 
 def _ocr_pages(path: str, page_numbers):
@@ -1001,8 +1034,10 @@ def extract_pdf(path: str) -> dict:
             _strip_repeating_headers_footers(pages_items,
                                              key=lambda r: r["text"])
         _mark_table_zones(cleaned_pages, pages_tbl)
-        _mark_headings(cleaned_pages)
-        md = _clean_text("\n".join(_render_lines(cleaned_pages, pages_tbl)))
+        n_headings = _mark_headings(cleaned_pages)
+        lines, sstats = _render_lines(cleaned_pages, pages_tbl)
+        md = _clean_text("\n".join(lines))
+        struct = _structure_note(n_headings, sstats["tables"], sstats["joins"])
 
         ocr_ok = [i for i in image_pages if ocr_texts.get(i, "").strip()]
         ocr_failed = [i for i in image_pages if i not in ocr_ok]
@@ -1030,6 +1065,8 @@ def extract_pdf(path: str) -> dict:
             if image_ok:
                 note += (f" Seite(n) {', '.join(map(str, image_ok))} per OCR "
                          f"erkannt (waren als Bild eingebettet).")
+        if struct:
+            note += " " + struct
         if rescued_broken:
             note += (f" Seite(n) {', '.join(map(str, rescued_broken))} "
                      f"ließ(en) sich nicht direkt lesen und wurde(n) per "
@@ -1095,12 +1132,17 @@ def extract_pdf(path: str) -> dict:
     # konservativ erkannte Ueberschriften als #/##/###, Gitter-Tabellen
     # als Pipe-Tabellen inline im Textfluss)
     _mark_table_zones(cleaned_pages, pages_tbl)
-    _mark_headings(cleaned_pages)
-    md = _clean_text("\n".join(_render_lines(cleaned_pages, pages_tbl)))
-    if removed > 0:
-        note = (f"PDF-Fliesstext als Markdown bereinigt. "
-                f"{removed} wiederkehrende Kopf-/Fusszeilen entfernt."
-                + _removed_note(removed_patterns))
+    n_headings = _mark_headings(cleaned_pages)
+    lines, sstats = _render_lines(cleaned_pages, pages_tbl)
+    md = _clean_text("\n".join(lines))
+    struct = _structure_note(n_headings, sstats["tables"], sstats["joins"])
+    if removed > 0 or struct:
+        note = "PDF-Fliesstext als Markdown bereinigt."
+        if struct:
+            note += " " + struct
+        if removed > 0:
+            note += (f" {removed} wiederkehrende Kopf-/Fusszeilen entfernt."
+                     + _removed_note(removed_patterns))
     else:
         note = "PDF-Fliesstext extrahiert und als sauberes Markdown bereinigt."
     return {
