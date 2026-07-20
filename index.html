@@ -703,27 +703,8 @@
   .stat-head { font-family: var(--disp); font-size: 14.5px; font-weight: 600; margin-bottom: 12px; }
   .tokens-card { text-align: center; padding: 30px 24px; }
 
-  .donut-wrap { position: relative; width: 150px; height: 150px; margin: 4px auto 10px; }
-  .donut-wrap svg { transform: rotate(-90deg); }
-  .donut-track { fill: none; stroke: var(--panel-2); stroke-width: 14; }
-  html[data-theme="light"] .donut-track { stroke: rgba(201,162,39,.15); }
-  .donut-seg {
-    fill: none; stroke-width: 14;
-    transition: stroke-dasharray .8s cubic-bezier(.3,.7,.2,1), stroke-dashoffset .8s cubic-bezier(.3,.7,.2,1);
-  }
-  #segRed    { stroke: var(--danger); }
-  #segYellow { stroke: var(--warn); }
-  #segGreen  { stroke: var(--ok); }
-  .donut-center {
-    position: absolute; inset: 0;
-    display: flex; align-items: center; justify-content: center;
-  }
-  .donut-total { font-family: var(--mono); font-size: 30px; font-weight: 700; }
-  .bucket-line { font-family: var(--mono); font-size: 12px; text-align: center; color: var(--ink-dim); margin-top: 4px; }
-  .bucket-line b.r { color: var(--danger); }
-  .bucket-line b.y { color: var(--warn); }
-  .bucket-line b.g { color: var(--ok); }
-
+  /* Schwachstellen-Ranking: nutzt die fmt-Balken, nur breitere Labels */
+  .weak-name { width: 118px; }
   .fmt-row {
     display: flex; align-items: center; gap: 10px;
     margin-bottom: 8px; font-family: var(--mono); font-size: 12px;
@@ -1019,23 +1000,11 @@
 
     <div class="stat-grid">
       <div class="card stat-card">
-        <div class="stat-head" id="donutTitle">Verteilung deiner bisherigen Prompt-Scores</div>
-        <div class="donut-wrap">
-          <svg width="150" height="150" viewBox="0 0 150 150">
-            <circle class="donut-track" cx="75" cy="75" r="60"></circle>
-            <circle class="donut-seg" id="segRed" cx="75" cy="75" r="60"></circle>
-            <circle class="donut-seg" id="segYellow" cx="75" cy="75" r="60"></circle>
-            <circle class="donut-seg" id="segGreen" cx="75" cy="75" r="60"></circle>
-          </svg>
-          <div class="donut-center"><div class="donut-total" id="donutTotal">0</div></div>
-        </div>
-        <div class="bucket-line" id="bucketLine"></div>
+        <div class="stat-head" id="weakTitle">Deine häufigsten Schwachstellen</div>
+        <div id="weakBars"></div>
       </div>
       <div class="card stat-card">
-        <div class="stat-head" id="bestTitle">Bester Score</div>
-        <div class="stat-big" id="statBest">–</div>
-        <div class="stat-sub" id="bestSub">dein bisher stärkster Prompt (von 100)</div>
-        <div class="stat-head" id="msTitle" style="margin-top:22px;">Meilensteine</div>
+        <div class="stat-head" id="msTitle">Meilensteine</div>
         <div class="stat-sub" id="msList"></div>
       </div>
     </div>
@@ -1197,11 +1166,11 @@
       statTokensCap: "Tokens gespart (gesamt)",
       statPages: n => `≈ ${n} Seiten Text (geschätzt, ~500 Tokens/Seite)`,
       statCost: c => `≈ ${c} US$ gesparte API-Kosten (grobe Schätzung, ~3 US$ je 1 Mio. Eingabe-Tokens)`,
-      donutTitle: "Verteilung deiner bisherigen Prompt-Scores",
-      donutEmpty: "Noch keine Prompts analysiert.",
-      bucketLine: (r, y, g) => `<b class="r">${r} rot</b> · <b class="y">${y} gelb</b> · <b class="g">${g} grün</b>`,
-      bestTitle: "Bester Score",
-      bestSub: "dein bisher stärkster Prompt (von 100)",
+      weakTitle: "Deine häufigsten Schwachstellen",
+      weakEmpty: "Noch keine Prompts analysiert.",
+      weakNames: { task: "Aufgabe", input: "Material", context: "Kontext",
+                   specificity: "Konkretheit", format: "Format",
+                   role: "Rolle", examples: "Beispiele" },
       msTitle: "Meilensteine",
       msFiles: "Dateien",
       msPrompts: "Prompts",
@@ -1213,7 +1182,7 @@
       fmtEmpty: "Noch keine Dateien konvertiert.",
       msNoneFiles: "noch keine — die erste zählt beim Download oder Kopieren",
       msNonePrompts: "noch keine — der erste zählt bei der Analyse",
-      statsPrivacy: "Deine Statistik wird nur lokal auf deinem Rechner gespeichert — ausschließlich Zahlen, keine Inhalte, keine Dateinamen. Sie verlässt deinen PC nie.",
+      statsPrivacy: "Die Statistik speichert nur Zahlen — keine Inhalte, keine Dateinamen — und bleibt lokal auf deinem Rechner; sie verlässt deinen PC nie. Deine konvertierten Dateien liegen im outputs-Ordner, bis du sie löschst.",
       statsResetBtn: "Statistik zurücksetzen",
       statsResetConfirm: "Wirklich? Erneut klicken zum Bestätigen",
       outTitle: "Ausgaben verwalten",
@@ -1308,11 +1277,11 @@
       statTokensCap: "tokens saved (total)",
       statPages: n => `≈ ${n} pages of text (estimated, ~500 tokens/page)`,
       statCost: c => `≈ $${c} in saved API costs (rough estimate, ~$3 per 1M input tokens)`,
-      donutTitle: "Distribution of your prompt scores so far",
-      donutEmpty: "No prompts analyzed yet.",
-      bucketLine: (r, y, g) => `<b class="r">${r} red</b> · <b class="y">${y} yellow</b> · <b class="g">${g} green</b>`,
-      bestTitle: "Best score",
-      bestSub: "your strongest prompt so far (out of 100)",
+      weakTitle: "Your most common weak spots",
+      weakEmpty: "No prompts analyzed yet.",
+      weakNames: { task: "Task", input: "Input", context: "Context",
+                   specificity: "Specificity", format: "Format",
+                   role: "Role", examples: "Examples" },
       msTitle: "Milestones",
       msFiles: "files",
       msPrompts: "prompts",
@@ -1324,7 +1293,7 @@
       fmtEmpty: "No files converted yet.",
       msNoneFiles: "none yet — the first counts on download or copy",
       msNonePrompts: "none yet — the first counts on analysis",
-      statsPrivacy: "Your statistics are stored locally on your machine only — nothing but numbers, no content, no file names. They never leave your PC.",
+      statsPrivacy: "The statistics store only numbers — no content, no file names — and stay local on your machine; they never leave your PC. Your converted files stay in the outputs folder until you delete them.",
       statsResetBtn: "Reset statistics",
       statsResetConfirm: "Sure? Click again to confirm",
       outTitle: "Manage outputs",
@@ -1406,9 +1375,7 @@
     setText('statFilesCap', t.statFilesCap);
     setText('statPromptsCap', t.statPromptsCap);
     setText('statTokensCap', t.statTokensCap);
-    setText('donutTitle', t.donutTitle);
-    setText('bestTitle', t.bestTitle);
-    setText('bestSub', t.bestSub);
+    setText('weakTitle', t.weakTitle);
     setText('msTitle', t.msTitle);
     setText('fmtTitle', t.fmtTitle);
     setText('statsPrivacy', t.statsPrivacy);
@@ -2030,7 +1997,6 @@
   //   - Prompt: pro Prompt-INHALT einmal (Re-Analyse desselben Texts zählt nicht).
 
   let lastStats = null;
-  const DONUT_LEN = 2 * Math.PI * 60;   // Umfang des Donut-Rings (r=60)
   const MILESTONES = [1, 10, 50, 100, 250, 500, 1000];
 
   async function refreshStats() {
@@ -2040,19 +2006,6 @@
       renderStats(lastStats);
     } catch (e) { /* Server weg - alte Anzeige stehen lassen */ }
     refreshOutputs();  // Ausgaben-Info im selben Zug aktualisieren
-  }
-
-  function renderDonut(r, y, g) {
-    const total = r + y + g;
-    let offset = 0;
-    [['segRed', r], ['segYellow', y], ['segGreen', g]].forEach(([id, val]) => {
-      const el = document.getElementById(id);
-      const len = total ? (val / total) * DONUT_LEN : 0;
-      el.style.strokeDasharray = `${len} ${DONUT_LEN - len}`;
-      el.style.strokeDashoffset = -offset;
-      offset += len;
-    });
-    document.getElementById('donutTotal').textContent = total.toLocaleString(LOCALE());
   }
 
   function msLine(label, count, noneText) {
@@ -2075,18 +2028,22 @@
     const cost = (s.tokens_saved_total / 1e6 * 3).toLocaleString(
       LOCALE(), { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     document.getElementById('statCost').textContent = t.statCost(cost);
-    // Interim bis Block F: score_buckets/best_score gibt es serverseitig
-    // nicht mehr; Donut zeigt bis zum UI-Umbau den Leerzustand.
-    const b = s.score_buckets || { red: 0, yellow: 0, green: 0 };
-    renderDonut(b.red, b.yellow, b.green);
-    const line = document.getElementById('bucketLine');
-    if (b.red + b.yellow + b.green > 0) {
-      line.innerHTML = t.bucketLine(b.red, b.yellow, b.green);
+    // Schwachstellen-Ranking: alle sieben Kriterien, absteigend sortiert,
+    // Balkenlänge relativ zum Maximum. Alle Zähler 0 -> Empty-State statt
+    // sieben Null-Balken.
+    const weakBox = document.getElementById('weakBars');
+    const weak = Object.entries(s.criteria_missed || {}).sort((a, b) => b[1] - a[1]);
+    if (!weak.length || weak.every(([, v]) => v === 0)) {
+      weakBox.innerHTML = `<div class="stat-sub" style="margin-top:0;">${t.weakEmpty}</div>`;
     } else {
-      line.textContent = t.donutEmpty;
+      const weakMax = Math.max(1, ...weak.map(([, v]) => v));
+      weakBox.innerHTML = weak.map(([key, val]) => `
+        <div class="fmt-row">
+          <span class="fmt-name weak-name">${t.weakNames[key] || key}</span>
+          <div class="fmt-bar-track"><div class="fmt-bar" style="width:${val / weakMax * 100}%"></div></div>
+          <span class="fmt-count">${val}</span>
+        </div>`).join('');
     }
-    document.getElementById('statBest').textContent =
-      s.prompts_analyzed > 0 && s.best_score != null ? s.best_score : '–';
     document.getElementById('msList').innerHTML =
       msLine(t.msFiles, s.files_converted, t.msNoneFiles) + '<br>' +
       msLine(t.msPrompts, s.prompts_analyzed, t.msNonePrompts);

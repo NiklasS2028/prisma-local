@@ -7,7 +7,10 @@ Server. Prüft die Zähl-Regeln Ende-zu-Ende durch die echte Oberfläche:
 
   - Konvertieren allein zählt NICHT - erst Download/Kopie (und nur einmal)
   - Re-Analyse desselben Prompts zählt nicht doppelt, geänderter Text schon
-  - Statistik-Tab rendert (DE/EN), Meilensteine, Donut, Format-Balken
+  - Statistik-Tab rendert (DE/EN), Meilensteine, Schwachstellen-Ranking,
+    Format-Balken; Donut und Bester Score existieren nicht mehr
+  - Ranking sortiert absteigend, Empty-State statt Null-Balken
+  - Ende-zu-Ende: Analyze-Klick aktualisiert das Ranking, Live-Tippen nicht
   - Reset-Button mit zweistufiger Sicherheitsabfrage
   - Screenshots des Tabs in beiden Themes
 
@@ -137,10 +140,10 @@ def test_stats_tab_renders(page):
     assert "geschätzt" in page.locator("#statCost").inner_text().lower() or \
            "Schätzung" in page.locator("#statCost").inner_text(), \
         "Kostenangabe nicht als Schätzung gekennzeichnet"
-    # Interim bis Block F: best_score/Donut-Daten gibt es serverseitig nicht
-    # mehr, die alten UI-Elemente zeigen bis zum Umbau den Leerzustand.
-    assert page.locator("#statBest").inner_text() == "–"
-    assert "Noch keine" in page.locator("#bucketLine").inner_text()
+    # Schwachstellen-Ranking: das gezählte Kriterium erscheint mit Zähler 1
+    bars = page.locator("#weakBars").inner_text()
+    assert "Beispiele" in bars, f"Kriterium fehlt im Ranking: {bars}"
+    assert "1" in bars, f"Zähler fehlt im Ranking: {bars}"
     assert "✓ 1" in page.locator("#msList").inner_text(), "Meilenstein '1 erreicht' fehlt"
     assert "10" in page.locator("#msList").inner_text(), "Nächster Meilenstein fehlt"
     assert "PDF" in page.locator("#formatBars").inner_text()
@@ -156,7 +159,9 @@ def test_stats_tab_english(page):
     page.click("#tabStats")
     page.wait_for_timeout(1400)
     assert page.locator("#pageTitle").inner_text() == "Your work in numbers."
-    assert "No prompts" in page.locator("#bucketLine").inner_text()
+    assert page.locator("#weakTitle").inner_text() == "Your most common weak spots"
+    assert "Context" in page.locator("#weakBars").inner_text(), \
+        "EN-Kriterienname fehlt im Ranking"
     assert "never leave" in page.locator("#statsPrivacy").inner_text()
     assert page.locator("#tabStats").inner_text() == "Stats"
 
@@ -180,13 +185,65 @@ def test_reset_two_step(page):
 
 
 def test_empty_state(page):
+    """Frisch installiert (alle Zähler 0): Empty-State-Botschaft statt
+    sieben Null-Balken."""
     server_reset()
     page.click("#tabStats")
     page.wait_for_timeout(800)
-    assert page.locator("#statBest").inner_text() == "–", \
-        "Bester Score muss ohne Analysen leer sein"
-    line = page.locator("#bucketLine").inner_text()
-    assert "Noch keine" in line, f"Leerzustand des Donuts fehlt: {line}"
+    bars = page.locator("#weakBars").inner_text()
+    assert "Noch keine" in bars, f"Empty-State des Rankings fehlt: {bars}"
+    assert page.locator("#weakBars .fmt-row").count() == 0, \
+        "Null-Balken statt Empty-State"
+
+
+def test_weak_ranking_sorted(page):
+    """F4: sieben Balken (auch input), absteigend sortiert, Zähler dran."""
+    server_reset()
+    requests.post(BASE + "/stats/count_prompt", json={"missed": ["format", "role"]})
+    requests.post(BASE + "/stats/count_prompt", json={"missed": ["format"]})
+    requests.post(BASE + "/stats/count_prompt", json={"missed": ["format", "context"]})
+    page.click("#tabStats")
+    page.wait_for_timeout(800)
+    rows = page.locator("#weakBars .fmt-row")
+    assert rows.count() == 7, f"{rows.count()} Balken statt 7"
+    names = page.locator("#weakBars .fmt-name").all_inner_texts()
+    counts = [int(c) for c in page.locator("#weakBars .fmt-count").all_inner_texts()]
+    assert names[0] == "Format" and counts[0] == 3, \
+        f"Spitzenreiter falsch: {names[0]}/{counts[0]}"
+    assert counts == sorted(counts, reverse=True), f"Nicht absteigend: {counts}"
+    assert "Material" in names, "input-Kriterium fehlt im Ranking"
+
+
+def test_donut_and_best_score_removed(page):
+    """F2: Donut- und Best-Score-Elemente existieren nicht mehr im DOM."""
+    page.click("#tabStats")
+    page.wait_for_timeout(400)
+    for sel in ("#segRed", "#segYellow", "#segGreen", "#donutTotal",
+                "#bucketLine", "#statBest", "#bestTitle", "#bestSub",
+                "#donutTitle"):
+        assert page.locator(sel).count() == 0, f"Altes Element noch im DOM: {sel}"
+
+
+def test_e2e_analyze_updates_ranking_live_does_not(page):
+    """F4 Ende-zu-Ende: Live-Tippen ändert das Ranking nicht, der
+    Analyze-Klick schon."""
+    server_reset()
+    page.click("#tabTrainer")
+    page.fill("#promptInput", "schreib mal irgendwas über hunde oder so")
+    page.wait_for_selector(".pt-result.show", timeout=5000)  # Live-Anzeige
+    page.wait_for_timeout(500)
+    page.click("#tabStats")
+    page.wait_for_timeout(800)
+    assert "Noch keine" in page.locator("#weakBars").inner_text(), \
+        "Live-Tippen hat das Ranking verändert"
+    page.click("#tabTrainer")
+    page.click("#analyzeBtn")
+    page.wait_for_timeout(600)
+    page.click("#tabStats")
+    page.wait_for_timeout(800)
+    bars = page.locator("#weakBars").inner_text()
+    assert "Kontext" in bars and page.locator("#weakBars .fmt-row").count() == 7, \
+        f"Analyze-Klick hat das Ranking nicht aktualisiert: {bars}"
 
 
 def outputs_info():
@@ -259,6 +316,9 @@ ALL_TESTS = [
     test_stats_tab_english,
     test_reset_two_step,
     test_empty_state,
+    test_weak_ranking_sorted,
+    test_donut_and_best_score_removed,
+    test_e2e_analyze_updates_ranking_live_does_not,
     test_outputs_manage_two_step,
     test_outputs_manage_english,
     test_screenshots_stats_both_themes,
