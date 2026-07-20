@@ -93,11 +93,12 @@ def test_stats_endpoints():
                       json={"saved_tokens": 42, "format": "pdf"})
     assert r.status_code == 200 and r.json()["ok"]
     r = requests.post(BASE + "/stats/count_prompt", timeout=10,
-                      json={"score": 90, "ampel": "gruen"})
+                      json={"missed": ["format"]})
     assert r.status_code == 200 and r.json()["ok"]
     s = requests.get(BASE + "/stats", timeout=10).json()
     assert s["files_converted"] == 1 and s["prompts_analyzed"] == 1
-    assert s["tokens_saved_total"] == 42 and s["best_score"] == 90
+    assert s["tokens_saved_total"] == 42
+    assert s["criteria_missed"]["format"] == 1
     requests.post(BASE + "/stats/reset", timeout=10)
     assert requests.get(BASE + "/stats", timeout=10).json()["files_converted"] == 0
 

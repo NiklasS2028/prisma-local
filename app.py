@@ -141,8 +141,9 @@ _DEFAULT_STATS = {
     "files_converted": 0,
     "prompts_analyzed": 0,
     "tokens_saved_total": 0,
-    "score_buckets": {"red": 0, "yellow": 0, "green": 0},
-    "best_score": 0,
+    "criteria_missed": {"task": 0, "input": 0, "context": 0,
+                        "specificity": 0, "format": 0, "role": 0,
+                        "examples": 0},
     "format_counts": {"pdf": 0, "docx": 0, "xlsx": 0, "csv": 0,
                       "txt": 0, "pptx": 0},
 }
@@ -190,18 +191,17 @@ def _load_stats():
     clean["files_converted"] = _clean_int(raw.get("files_converted"))
     clean["prompts_analyzed"] = _clean_int(raw.get("prompts_analyzed"))
     clean["tokens_saved_total"] = _clean_int(raw.get("tokens_saved_total"))
-    clean["best_score"] = _clean_int(raw.get("best_score"), 0, 100)
-    buckets = raw.get("score_buckets") or {}
-    for key in clean["score_buckets"]:
-        clean["score_buckets"][key] = _clean_int(
-            buckets.get(key) if isinstance(buckets, dict) else 0)
+    criteria = raw.get("criteria_missed") or {}
+    for key in clean["criteria_missed"]:
+        clean["criteria_missed"][key] = _clean_int(
+            criteria.get(key) if isinstance(criteria, dict) else 0)
     formats = raw.get("format_counts") or {}
     for key in clean["format_counts"]:
         clean["format_counts"][key] = _clean_int(
             formats.get(key) if isinstance(formats, dict) else 0)
-    _dbg("_load_stats OK  files={} prompts={} tokens={} best={}".format(
+    _dbg("_load_stats OK  files={} prompts={} tokens={}".format(
         clean["files_converted"], clean["prompts_analyzed"],
-        clean["tokens_saved_total"], clean["best_score"]))
+        clean["tokens_saved_total"]))
     return clean
 
 
@@ -211,9 +211,9 @@ def _save_stats(stats):
     mitten im Schreiben kann so nie die bestehende Datei zerstoeren.
     Fehler duerfen die Kernfunktion nie stoppen."""
     caller = _caller()
-    _dbg("_save_stats <- {} | SCHREIBT files={} prompts={} tokens={} best={} -> {}".format(
+    _dbg("_save_stats <- {} | SCHREIBT files={} prompts={} tokens={} -> {}".format(
         caller, stats.get("files_converted"), stats.get("prompts_analyzed"),
-        stats.get("tokens_saved_total"), stats.get("best_score"), STATS_PATH))
+        stats.get("tokens_saved_total"), STATS_PATH))
     tmp_path = STATS_PATH + ".tmp"
     try:
         with open(tmp_path, "w", encoding="utf-8") as f:
@@ -592,22 +592,24 @@ def stats_count_prompt():
     """
     Zaehl-Event des Clients: eine Prompt-Analyse (pro Prompt-Inhalt nur
     einmal - die Dopplungs-Entscheidung trifft der Client).
-    Payload: nur Score-Zahl + Ampel-Kategorie, NIE der Prompt selbst.
+    Payload: nur die Liste roter (nicht erfuellter) Kriterien-Schluessel,
+    NIE der Prompt selbst. Unbekannte Schluessel werden ignoriert,
+    Duplikate zaehlen einfach, leere Liste zaehlt nur den Prompt.
     Cross-Site-POSTs fremder Webseiten werden per Origin-Check abgewiesen.
     """
     denied = _check_origin()
     if denied:
         return denied
     data = request.get_json(silent=True) or {}
-    score = _clean_int(data.get("score"), 0, 100)
-    bucket = {"rot": "red", "gelb": "yellow", "gruen": "green"}.get(data.get("ampel"))
-    if bucket is None:
-        return jsonify({"ok": False, "error": "Unbekannte Ampel-Farbe."}), 400
+    missed = data.get("missed")
+    if not isinstance(missed, list):
+        missed = []
     with _STATS_LOCK:
         stats = _load_stats()
         stats["prompts_analyzed"] += 1
-        stats["score_buckets"][bucket] += 1
-        stats["best_score"] = max(stats["best_score"], score)
+        for key in {k for k in missed if isinstance(k, str)}:
+            if key in stats["criteria_missed"]:
+                stats["criteria_missed"][key] += 1
         _save_stats(stats)
         return jsonify({"ok": True, "stats": stats})
 

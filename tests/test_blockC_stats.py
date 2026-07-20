@@ -5,10 +5,13 @@ test_blockC_stats.py
 Backend-Tests für Block C (Statistik) gegen den laufenden Server.
 
 Geprüft wird:
-  - GET /stats liefert die Null-Struktur
+  - GET /stats liefert die Null-Struktur (criteria_missed über die 7
+    Kriterien-Schlüssel, kein score_buckets/best_score mehr)
   - count_file / count_prompt zählen korrekt (inkl. Klemmen negativer Werte,
-    best_score-Logik, Format-Mapping xlsm->xlsx / md->txt)
-  - ungültige Ampel-Farbe -> 400
+    Format-Mapping xlsm->xlsx / md->txt)
+  - count_prompt-Randfälle: unbekannte Schlüssel ignoriert, Duplikate
+    dedupliziert, leere Liste zählt nur den Prompt, kaputter Payload crasht nicht
+  - alte stats.json mit score_buckets/best_score lädt crashfrei und normalisiert
   - stats.json enthält AUSSCHLIESSLICH Zahlen (rekursiv geprüft)
   - kaputte/fehlende stats.json crasht nicht (Neustart bei Null)
   - /stats/reset setzt alles auf Null
@@ -49,9 +52,13 @@ def count_file(saved, fmt):
                          json={"saved_tokens": saved, "format": fmt})
 
 
-def count_prompt(score, ampel):
+CRITERIA = ["task", "input", "context", "specificity", "format", "role",
+            "examples"]
+
+
+def count_prompt(missed):
     return requests.post(BASE + "/stats/count_prompt", timeout=10,
-                         json={"score": score, "ampel": ampel})
+                         json={"missed": missed})
 
 
 def assert_numbers_only(obj, path="stats"):
@@ -72,8 +79,7 @@ def test_default_structure():
         "files_converted": 0,
         "prompts_analyzed": 0,
         "tokens_saved_total": 0,
-        "score_buckets": {"red": 0, "yellow": 0, "green": 0},
-        "best_score": 0,
+        "criteria_missed": {key: 0 for key in CRITERIA},
         "format_counts": {"pdf": 0, "docx": 0, "xlsx": 0, "csv": 0,
                           "txt": 0, "pptx": 0},
     }, f"Null-Struktur weicht ab: {s}"
@@ -109,36 +115,92 @@ def test_format_mapping():
     assert sum(s["format_counts"].values()) == 2
 
 
-def test_count_prompt_and_best_score():
+def test_count_prompt_criteria():
+    """3 rote Kriterien -> genau diese 3 Zähler +1, prompts_analyzed +1."""
     reset()
-    assert count_prompt(29, "rot").json()["ok"]
-    assert count_prompt(90, "gruen").json()["ok"]
-    assert count_prompt(48, "gelb").json()["ok"]
+    assert count_prompt(["context", "format", "examples"]).json()["ok"]
     s = get_stats()
-    assert s["prompts_analyzed"] == 3
-    assert s["score_buckets"] == {"red": 1, "yellow": 1, "green": 1}
-    assert s["best_score"] == 90, "best_score muss das Maximum halten"
+    assert s["prompts_analyzed"] == 1
+    expected = {key: 0 for key in CRITERIA}
+    expected.update({"context": 1, "format": 1, "examples": 1})
+    assert s["criteria_missed"] == expected, f"Zähler falsch: {s['criteria_missed']}"
 
 
-def test_invalid_ampel_rejected():
+def test_count_prompt_unknown_key_ignored():
     reset()
-    r = count_prompt(50, "lila")
-    assert r.status_code == 400 and not r.json()["ok"]
-    assert get_stats()["prompts_analyzed"] == 0, "Ungültiges Event darf nicht zählen"
+    r = count_prompt(["task", "quatsch", 42, None, {"x": 1}])
+    assert r.status_code == 200 and r.json()["ok"], \
+        "Unbekannte/kaputte Einträge dürfen nicht crashen"
+    s = get_stats()
+    assert s["prompts_analyzed"] == 1
+    assert s["criteria_missed"]["task"] == 1
+    assert sum(s["criteria_missed"].values()) == 1, "Nur 'task' darf zählen"
+
+
+def test_count_prompt_duplicates_deduplicated():
+    reset()
+    assert count_prompt(["role", "role", "role"]).json()["ok"]
+    s = get_stats()
+    assert s["criteria_missed"]["role"] == 1, \
+        "Duplikate in der Liste: max. +1 pro Kriterium pro Prompt"
+
+
+def test_count_prompt_empty_list():
+    reset()
+    assert count_prompt([]).json()["ok"]
+    s = get_stats()
+    assert s["prompts_analyzed"] == 1
+    assert sum(s["criteria_missed"].values()) == 0
+
+
+def test_count_prompt_broken_payload():
+    """Kein/kaputtes 'missed'-Feld -> zählt nur den Prompt, kein Crash."""
+    reset()
+    r = requests.post(BASE + "/stats/count_prompt", timeout=10,
+                      json={"missed": "keine-liste"})
+    assert r.status_code == 200 and r.json()["ok"]
+    r = requests.post(BASE + "/stats/count_prompt", timeout=10,
+                      json={"score": 90, "ampel": "gruen"})  # altes Format
+    assert r.status_code == 200 and r.json()["ok"]
+    s = get_stats()
+    assert s["prompts_analyzed"] == 2
+    assert sum(s["criteria_missed"].values()) == 0
+
+
+def test_old_schema_file_normalizes():
+    """Alte stats.json mit score_buckets/best_score lädt crashfrei;
+    Whitelist verwirft die alten Felder, criteria_missed startet bei 0."""
+    reset()
+    with open(STATS_PATH, "w", encoding="utf-8") as f:
+        json.dump({"files_converted": 7, "prompts_analyzed": 3,
+                   "tokens_saved_total": 500,
+                   "score_buckets": {"red": 1, "yellow": 1, "green": 1},
+                   "best_score": 90}, f)
+    s = get_stats()
+    assert "score_buckets" not in s and "best_score" not in s, \
+        "Alte Felder überleben das Laden"
+    assert s["files_converted"] == 7 and s["prompts_analyzed"] == 3
+    assert s["criteria_missed"] == {key: 0 for key in CRITERIA}
+    # Zählen schreibt die Datei im neuen Schema neu
+    assert count_prompt(["format"]).json()["ok"]
+    with open(STATS_PATH, "r", encoding="utf-8") as f:
+        on_disk = json.load(f)
+    assert "score_buckets" not in on_disk and "best_score" not in on_disk
+    assert on_disk["criteria_missed"]["format"] == 1
 
 
 def test_stats_file_numbers_only():
     reset()
     count_file(120, "pdf")
-    count_prompt(90, "gruen")
+    count_prompt(["context"])
     with open(STATS_PATH, "r", encoding="utf-8") as f:
         on_disk = json.load(f)
     assert_numbers_only(on_disk)
     # Und explizit: exakt die erlaubte Schlüssel-Struktur, nichts darüber hinaus
     assert set(on_disk.keys()) == {"files_converted", "prompts_analyzed",
-                                   "tokens_saved_total", "score_buckets",
-                                   "best_score", "format_counts"}
-    assert set(on_disk["score_buckets"].keys()) == {"red", "yellow", "green"}
+                                   "tokens_saved_total", "criteria_missed",
+                                   "format_counts"}
+    assert set(on_disk["criteria_missed"].keys()) == set(CRITERIA)
     assert set(on_disk["format_counts"].keys()) == {"pdf", "docx", "xlsx",
                                                     "csv", "txt", "pptx"}
 
@@ -160,11 +222,14 @@ def test_foreign_keys_are_dropped():
     reset()
     with open(STATS_PATH, "w", encoding="utf-8") as f:
         json.dump({"files_converted": 5, "geheimer_text": "darf nicht bleiben",
-                   "best_score": 999}, f)
+                   "criteria_missed": {"task": -3, "fremd": 9}}, f)
     s = get_stats()
     assert "geheimer_text" not in s, "Fremder Schlüssel überlebt das Laden"
     assert s["files_converted"] == 5
-    assert s["best_score"] == 100, "best_score muss auf 0..100 geklemmt werden"
+    assert "fremd" not in s["criteria_missed"], \
+        "Fremder Kriterien-Schlüssel überlebt das Laden"
+    assert s["criteria_missed"]["task"] == 0, \
+        "Negativer Zähler muss auf 0 geklemmt werden"
 
 
 def test_origin_check_reset():
@@ -191,7 +256,7 @@ def test_origin_check_count_endpoints():
                       json={"saved_tokens": 9999, "format": "pdf"}, headers=evil)
     assert r.status_code == 403, f"count_file: {r.status_code}"
     r = requests.post(BASE + "/stats/count_prompt", timeout=10,
-                      json={"score": 1, "ampel": "rot"}, headers=evil)
+                      json={"missed": ["task"]}, headers=evil)
     assert r.status_code == 403, f"count_prompt: {r.status_code}"
     s = get_stats()
     assert s["files_converted"] == 0 and s["prompts_analyzed"] == 0, \
@@ -233,7 +298,7 @@ def test_atomic_save_leaves_no_tmp():
     """Erfolgsfall: nach jedem Zaehl-Event existiert keine .tmp-Datei."""
     reset()
     assert count_file(5, "txt").json()["ok"]
-    assert count_prompt(48, "gelb").json()["ok"]
+    assert count_prompt(["context"]).json()["ok"]
     assert not os.path.exists(STATS_PATH + ".tmp"), ".tmp nach Erfolg übrig"
     s = get_stats()
     assert s["files_converted"] == 1 and s["prompts_analyzed"] == 1
@@ -343,12 +408,12 @@ def test_outputs_open_origin_check():
 def test_reset():
     reset()
     count_file(100, "pdf")
-    count_prompt(90, "gruen")
+    count_prompt(["format", "role"])
     reset()
     s = get_stats()
     assert s["files_converted"] == 0 and s["prompts_analyzed"] == 0
-    assert s["tokens_saved_total"] == 0 and s["best_score"] == 0
-    assert sum(s["score_buckets"].values()) == 0
+    assert s["tokens_saved_total"] == 0
+    assert sum(s["criteria_missed"].values()) == 0
     assert sum(s["format_counts"].values()) == 0
 
 
@@ -357,8 +422,12 @@ ALL_TESTS = [
     test_count_file,
     test_count_file_clamps_negative,
     test_format_mapping,
-    test_count_prompt_and_best_score,
-    test_invalid_ampel_rejected,
+    test_count_prompt_criteria,
+    test_count_prompt_unknown_key_ignored,
+    test_count_prompt_duplicates_deduplicated,
+    test_count_prompt_empty_list,
+    test_count_prompt_broken_payload,
+    test_old_schema_file_normalizes,
     test_stats_file_numbers_only,
     test_corrupt_stats_file_survives,
     test_foreign_keys_are_dropped,

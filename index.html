@@ -2029,7 +2029,9 @@
     const cost = (s.tokens_saved_total / 1e6 * 3).toLocaleString(
       LOCALE(), { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     document.getElementById('statCost').textContent = t.statCost(cost);
-    const b = s.score_buckets;
+    // Interim bis Block F: score_buckets/best_score gibt es serverseitig
+    // nicht mehr; Donut zeigt bis zum UI-Umbau den Leerzustand.
+    const b = s.score_buckets || { red: 0, yellow: 0, green: 0 };
     renderDonut(b.red, b.yellow, b.green);
     const line = document.getElementById('bucketLine');
     if (b.red + b.yellow + b.green > 0) {
@@ -2038,7 +2040,7 @@
       line.textContent = t.donutEmpty;
     }
     document.getElementById('statBest').textContent =
-      s.prompts_analyzed > 0 ? s.best_score : '–';
+      s.prompts_analyzed > 0 && s.best_score != null ? s.best_score : '–';
     document.getElementById('msList').innerHTML =
       msLine(t.msFiles, s.files_converted, t.msNoneFiles) + '<br>' +
       msLine(t.msPrompts, s.prompts_analyzed, t.msNonePrompts);
@@ -2151,15 +2153,20 @@
   }
 
   // --- Zähl-Event Trainer (einmal pro Prompt-Inhalt) ---
+  // Payload: nur die Liste roter (nicht erfüllter) Kriterien-Schlüssel,
+  // nie der Prompt selbst. Rot = status < 0.5 (gleiche Schwelle wie die
+  // Ampel-Punkte in der Check-Liste).
   let lastCountedPrompt = null;
   function countPromptOnce(promptText, data) {
     const normalized = promptText.trim();
     if (normalized === lastCountedPrompt) return;
     lastCountedPrompt = normalized;
+    const missed = (data.checks || [])
+      .filter(c => c.status < 0.5).map(c => c.id);
     fetch('/stats/count_prompt', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ score: data.score, ampel: data.ampel })
+      body: JSON.stringify({ missed })
     }).catch(() => {});
   }
 

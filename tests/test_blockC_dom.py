@@ -112,14 +112,19 @@ def test_prompt_counted_once_per_content(page):
     page.wait_for_timeout(400)
     s = server_stats()
     assert s["prompts_analyzed"] == 2
-    assert s["score_buckets"]["red"] == 1 and s["score_buckets"]["green"] == 1
-    assert s["best_score"] == 90
+    # Demo schwach: context/specificity/format/role/examples rot;
+    # Demo stark: nur examples rot -> examples zählt 2x
+    cm = s["criteria_missed"]
+    assert cm["context"] == 1 and cm["specificity"] == 1
+    assert cm["format"] == 1 and cm["role"] == 1
+    assert cm["examples"] == 2
+    assert cm["task"] == 0 and cm["input"] == 0
 
 
 def test_stats_tab_renders(page):
     server_reset()
     requests.post(BASE + "/stats/count_file", json={"saved_tokens": 1000, "format": "pdf"})
-    requests.post(BASE + "/stats/count_prompt", json={"score": 90, "ampel": "gruen"})
+    requests.post(BASE + "/stats/count_prompt", json={"missed": ["examples"]})
     page.click("#tabStats")
     page.wait_for_timeout(1400)  # fetch + countUp
     assert page.locator("#pageTitle").inner_text() == "Deine Arbeit in Zahlen."
@@ -132,8 +137,10 @@ def test_stats_tab_renders(page):
     assert "geschätzt" in page.locator("#statCost").inner_text().lower() or \
            "Schätzung" in page.locator("#statCost").inner_text(), \
         "Kostenangabe nicht als Schätzung gekennzeichnet"
-    assert page.locator("#statBest").inner_text() == "90"
-    assert "grün" in page.locator("#bucketLine").inner_text()
+    # Interim bis Block F: best_score/Donut-Daten gibt es serverseitig nicht
+    # mehr, die alten UI-Elemente zeigen bis zum Umbau den Leerzustand.
+    assert page.locator("#statBest").inner_text() == "–"
+    assert "Noch keine" in page.locator("#bucketLine").inner_text()
     assert "✓ 1" in page.locator("#msList").inner_text(), "Meilenstein '1 erreicht' fehlt"
     assert "10" in page.locator("#msList").inner_text(), "Nächster Meilenstein fehlt"
     assert "PDF" in page.locator("#formatBars").inner_text()
@@ -144,12 +151,12 @@ def test_stats_tab_renders(page):
 
 def test_stats_tab_english(page):
     server_reset()
-    requests.post(BASE + "/stats/count_prompt", json={"score": 48, "ampel": "gelb"})
+    requests.post(BASE + "/stats/count_prompt", json={"missed": ["context"]})
     page.click('#langToggle .lang-btn[data-lang="en"]')
     page.click("#tabStats")
     page.wait_for_timeout(1400)
     assert page.locator("#pageTitle").inner_text() == "Your work in numbers."
-    assert "yellow" in page.locator("#bucketLine").inner_text()
+    assert "No prompts" in page.locator("#bucketLine").inner_text()
     assert "never leave" in page.locator("#statsPrivacy").inner_text()
     assert page.locator("#tabStats").inner_text() == "Stats"
 
@@ -232,8 +239,9 @@ def test_screenshots_stats_both_themes(page):
     requests.post(BASE + "/stats/count_file", json={"saved_tokens": 84000, "format": "pdf"})
     requests.post(BASE + "/stats/count_file", json={"saved_tokens": 12000, "format": "docx"})
     requests.post(BASE + "/stats/count_file", json={"saved_tokens": 4000, "format": "xlsx"})
-    for score, ampel in ((29, "rot"), (48, "gelb"), (90, "gruen"), (81, "gruen")):
-        requests.post(BASE + "/stats/count_prompt", json={"score": score, "ampel": ampel})
+    for missed in (["context", "format", "role"], ["specificity"],
+                   ["examples"], []):
+        requests.post(BASE + "/stats/count_prompt", json={"missed": missed})
     for theme in ("light", "dark"):
         page.click(f'#themeToggle .lang-btn[data-theme="{theme}"]')
         page.click("#tabStats")
