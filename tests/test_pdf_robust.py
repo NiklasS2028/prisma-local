@@ -147,7 +147,7 @@ class _no_ocr:
     def __enter__(self):
         import converter
         self._orig = converter._ocr_pages
-        converter._ocr_pages = lambda path, pages: (
+        converter._ocr_pages = lambda path, pages, lang="de": (
             {}, "Texterkennung im Test deaktiviert.")
         return self
 

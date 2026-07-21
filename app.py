@@ -289,7 +289,7 @@ def index():
         return Response(f.read(), mimetype="text/html")
 
 
-def _process_upload(upload, target_model):
+def _process_upload(upload, target_model, ui_lang="de"):
     """
     Gemeinsame Kette fuer Einzel- UND Batch-Konvertierung: validiert die
     Datei, speichert sie temporaer, schickt sie durch den BESTEHENDEN
@@ -323,7 +323,7 @@ def _process_upload(upload, target_model):
 
     try:
         result = convert_file(tmp_path, target_model=target_model,
-                              original_name=filename)
+                              original_name=filename, lang=ui_lang)
     finally:
         # Upload sofort wieder loeschen - wir brauchen nur das Ergebnis
         try:
@@ -363,8 +363,10 @@ def convert():
 
     # Ziel-Modell aus dem Formular lesen (claude/gpt/gemini/none)
     target_model = request.form.get("target_model", "none").lower()
+    # UI-Sprache fuer die Anzeige-Note; Validierung macht convert_file
+    ui_lang = request.form.get("ui_lang", "de")
 
-    result = _process_upload(upload, target_model)
+    result = _process_upload(upload, target_model, ui_lang)
     if not result.get("ok"):
         return jsonify(result), 400
 
@@ -413,6 +415,7 @@ def convert_batch():
         }), 400
 
     target_model = request.form.get("target_model", "none").lower()
+    ui_lang = request.form.get("ui_lang", "de")
 
     results = []
     for upload in uploads:
@@ -425,7 +428,7 @@ def convert_batch():
             "format": os.path.splitext(original_name)[1].lower().lstrip("."),
         }
         try:
-            res = _process_upload(upload, target_model)
+            res = _process_upload(upload, target_model, ui_lang)
         except Exception as e:
             # Eine einzelne kaputte Datei darf den Batch NIE mitreissen.
             item["status"] = "error"

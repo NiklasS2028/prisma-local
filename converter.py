@@ -195,7 +195,180 @@ _PROTECTED = re.compile(
 )
 
 
-def _removed_note(removed_lines, max_show=4):
+def _plural(n, one, many):
+    """Anzeige-Zahl mit korrektem Numerus: '1 Ueberschrift' vs
+    '3 Ueberschriften'. one/many sind die kompletten Wortgruppen (in der
+    jeweiligen Sprache), damit auch Faelle mit veraendertem Innenteil passen
+    ('1 Zeilenumbruch zu einem Absatz verbunden' vs 'K Zeilenumbrueche zu
+    Absaetzen verbunden'). Sprachneutral: der Aufrufer liefert die Woerter."""
+    return f"{n} {one if n == 1 else many}"
+
+
+def _norm_lang(lang):
+    """Validierung des Note-Sprachparameters: nur 'de'/'en', alles andere
+    (None, Tippfehler, fremde Codes) faellt auf 'de' zurueck."""
+    return lang if lang in ("de", "en") else "de"
+
+
+# Alle nutzerseitig sichtbaren Notes (Block H). DE ist wortgleich zum
+# frueheren Hardcode-Stand - keine Umformulierung nebenbei.
+_NOTES = {
+    "de": {
+        "image_note": (" Hinweis: {n} eingebettete(s) Bild(er)/Grafik(en) "
+                       "wurden nicht übernommen (nur Text ist extrahierbar)."),
+        "ocr_needed": (
+            "Fuer Bild-Seiten wird OCR benoetigt. Bitte installiere die Pakete:\n"
+            "  pip install pdf2image pytesseract\n"
+            "und das Programm Tesseract (siehe README, Abschnitt OCR)."),
+        "tesseract_missing": (
+            "Das Programm 'Tesseract' wurde nicht gefunden.\n"
+            "Windows: Installer von https://github.com/UB-Mannheim/tesseract/wiki\n"
+            "oder per winget: winget install -e --id UB-Mannheim.TesseractOCR\n"
+            "Nach der Installation Tool neu starten. Details im README."),
+        "poppler_missing": (
+            "PDF-Seite {n} konnte nicht in ein Bild gewandelt werden ({e}).\n"
+            "Windows braucht dafuer 'poppler'.\n"
+            "Per winget: winget install -e --id oschwartz10612.Poppler\n"
+            "Anleitung im README."),
+        "bildpdf_no_text": "BILD-PDF ERKANNT (kein Text enthalten). {err}",
+        "broken_skipped_prefix": ("ACHTUNG - UNVOLLSTÄNDIG: Seite(n) {pages} "
+                                  "konnte(n) nicht gelesen werden und wurde(n) "
+                                  "übersprungen. "),
+        "rescued_all_pages": ("PDF-Seiten ließen sich nicht direkt lesen und "
+                              "wurden per Texterkennung (OCR) gerettet "
+                              "({n} Seiten)."),
+        "bildpdf_ocr": ("BILD-PDF per OCR erkannt ({n} Seiten, Text war als "
+                        "Bild eingebettet). Als Bild kostet so ein PDF ein "
+                        "Vielfaches an Tokens - als Text ist es jetzt schlank "
+                        "lesbar."),
+        "rescued_pages": (" Seite(n) {pages} ließ(en) sich nicht direkt lesen "
+                          "und wurde(n) per Texterkennung gerettet."),
+        "ocr_aborted": ("ACHTUNG - UNVOLLSTÄNDIG: OCR brach ab, Seite(n) "
+                        "{pages} fehlen im Ergebnis. {err} | {note}"),
+        "mixed_image_fail": ("Seite(n) {pages} sind Bild-Seiten und konnten "
+                             "nicht per OCR gelesen werden."),
+        "mixed_broken_fail": ("Seite(n) {pages} konnte(n) nicht gelesen "
+                              "werden und wurde(n) übersprungen."),
+        "mixed_incomplete": ("ACHTUNG - UNVOLLSTÄNDIG: Gemischtes PDF, aber "
+                             "{parts} {err} Die {n} Textseite(n) sind enthalten."),
+        "mixed_ok": "Gemischtes PDF: {n} Textseite(n) direkt extrahiert.",
+        "mixed_ocr_pages": (" Seite(n) {pages} per OCR erkannt (waren als "
+                            "Bild eingebettet)."),
+        "headers_removed": " {n} wiederkehrende Kopf-/Fusszeilen entfernt.",
+        "removed_shown": " Entfernt: {shown}{more}.",
+        "removed_more": " (+{n} weitere Muster)",
+        "table_pdf": ("PDF enthält überwiegend Tabellen -> als CSV konvertiert "
+                      "(token-effizienteste Form für Daten)."),
+        "companion_kept": (" Begleittext ausserhalb der Tabellen wurde mit "
+                           "übernommen."),
+        "pdf_cleaned": "PDF-Fliesstext als Markdown bereinigt.",
+        "pdf_plain": ("PDF-Fliesstext extrahiert und als sauberes Markdown "
+                      "bereinigt."),
+        "st_heading_one": "Überschrift erkannt",
+        "st_heading_many": "Überschriften erkannt",
+        "st_table_one": "Tabelle übernommen",
+        "st_table_many": "Tabellen übernommen",
+        "st_join_one": "Zeilenumbruch zu einem Absatz verbunden",
+        "st_join_many": "Zeilenumbrüche zu Absätzen verbunden",
+        "docx_note": ("Word-Struktur (Überschriften, Listen, Tabellen) in "
+                      "natives Markdown übersetzt - in Original-Reihenfolge. "
+                      "Hinweis: Fußnoten, Textboxen und Kopf-/Fußzeilen kann "
+                      "die Word-Bibliothek prinzipbedingt nicht extrahieren."),
+        "xlsx_note": ("Excel-Daten als CSV exportiert - das token-effizienteste "
+                      "Format für Tabellen (bis zu 3x weniger als JSON/HTML)."),
+        "xlsx_formula": (" Hinweis: {n} Formel-Zelle(n) ohne gespeichertes "
+                         "Ergebnis - die Formel selbst wurde ausgegeben (Datei "
+                         "einmal in Excel öffnen und speichern liefert die "
+                         "Werte)."),
+        "csv_note": ("CSV ist bereits das effizienteste Datenformat - nur "
+                     "Zeilenumbrueche vereinheitlicht."),
+        "txt_note": ("Textdatei bereinigt (ueberfluessige Leerzeilen und "
+                     "Whitespace entfernt)."),
+        "pptx_note": ("PowerPoint-Folien in Markdown umgewandelt (Text pro "
+                      "Folie extrahiert)."),
+        "pptx_speaker": (" Hinweis: {n} Folie(n) enthalten Sprechernotizen - "
+                         "diese sind im Output mit enthalten."),
+    },
+    "en": {
+        "image_note": (" Note: {n} embedded image(s)/graphic(s) were not "
+                       "carried over (only text can be extracted)."),
+        "ocr_needed": (
+            "OCR is required for image pages. Please install the packages:\n"
+            "  pip install pdf2image pytesseract\n"
+            "and the Tesseract program (see README, OCR section)."),
+        "tesseract_missing": (
+            "The 'Tesseract' program was not found.\n"
+            "Windows: installer from https://github.com/UB-Mannheim/tesseract/wiki\n"
+            "or via winget: winget install -e --id UB-Mannheim.TesseractOCR\n"
+            "Restart the tool after installation. Details in the README."),
+        "poppler_missing": (
+            "PDF page {n} could not be converted into an image ({e}).\n"
+            "Windows needs 'poppler' for this.\n"
+            "Via winget: winget install -e --id oschwartz10612.Poppler\n"
+            "Instructions in the README."),
+        "bildpdf_no_text": "IMAGE PDF DETECTED (no text contained). {err}",
+        "broken_skipped_prefix": ("WARNING - INCOMPLETE: page(s) {pages} "
+                                  "could not be read and were skipped. "),
+        "rescued_all_pages": ("PDF pages could not be read directly and were "
+                              "rescued via text recognition (OCR) ({n} pages)."),
+        "bildpdf_ocr": ("IMAGE PDF recognized via OCR ({n} pages, text was "
+                        "embedded as images). As images such a PDF costs many "
+                        "times more tokens - as text it is now cheap to read."),
+        "rescued_pages": (" Page(s) {pages} could not be read directly and "
+                          "were rescued via text recognition."),
+        "ocr_aborted": ("WARNING - INCOMPLETE: OCR aborted, page(s) {pages} "
+                        "are missing from the result. {err} | {note}"),
+        "mixed_image_fail": ("Page(s) {pages} are image pages and could not "
+                             "be read via OCR."),
+        "mixed_broken_fail": "Page(s) {pages} could not be read and were skipped.",
+        "mixed_incomplete": ("WARNING - INCOMPLETE: mixed PDF, but {parts} "
+                             "{err} The {n} text page(s) are included."),
+        "mixed_ok": "Mixed PDF: {n} text page(s) extracted directly.",
+        "mixed_ocr_pages": (" Page(s) {pages} recognized via OCR (were "
+                            "embedded as images)."),
+        "headers_removed": " {n} recurring header/footer lines removed.",
+        "removed_shown": " Removed: {shown}{more}.",
+        "removed_more": " (+{n} more patterns)",
+        "table_pdf": ("PDF consists mostly of tables -> converted to CSV "
+                      "(the most token-efficient form for data)."),
+        "companion_kept": (" Accompanying text outside the tables was carried "
+                           "over as well."),
+        "pdf_cleaned": "PDF body text cleaned up as Markdown.",
+        "pdf_plain": ("PDF body text extracted and cleaned up as tidy "
+                      "Markdown."),
+        "st_heading_one": "heading detected",
+        "st_heading_many": "headings detected",
+        "st_table_one": "table carried over",
+        "st_table_many": "tables carried over",
+        "st_join_one": "line break joined into a paragraph",
+        "st_join_many": "line breaks joined into paragraphs",
+        "docx_note": ("Word structure (headings, lists, tables) translated "
+                      "into native Markdown - in original order. Note: "
+                      "footnotes, text boxes and headers/footers cannot be "
+                      "extracted by the Word library."),
+        "xlsx_note": ("Excel data exported as CSV - the most token-efficient "
+                      "format for tables (up to 3x less than JSON/HTML)."),
+        "xlsx_formula": (" Note: {n} formula cell(s) without a cached result "
+                         "- the formula itself was written out (opening and "
+                         "saving the file once in Excel provides the values)."),
+        "csv_note": ("CSV is already the most efficient data format - only "
+                     "line endings were unified."),
+        "txt_note": ("Text file cleaned up (superfluous blank lines and "
+                     "whitespace removed)."),
+        "pptx_note": ("PowerPoint slides converted to Markdown (text "
+                      "extracted per slide)."),
+        "pptx_speaker": (" Note: {n} slide(s) contain speaker notes - these "
+                         "are included in the output."),
+    },
+}
+
+
+def _nt(lang, key, **kw):
+    """Note-Text in der gewuenschten Sprache, formatiert."""
+    return _NOTES[_norm_lang(lang)][key].format(**kw)
+
+
+def _removed_note(removed_lines, max_show=4, lang="de"):
     """Formatiert die entfernten Kopf-/Fusszeilen fuer den Hinweistext,
     damit der Nutzer Fehlgriffe sofort sehen kann (Transparenz)."""
     if not removed_lines:
@@ -203,33 +376,24 @@ def _removed_note(removed_lines, max_show=4):
     shown = ", ".join(f"'{l}'" for l in removed_lines[:max_show])
     more = ""
     if len(removed_lines) > max_show:
-        more = f" (+{len(removed_lines) - max_show} weitere Muster)"
-    return f" Entfernt: {shown}{more}."
+        more = _nt(lang, "removed_more", n=len(removed_lines) - max_show)
+    return _nt(lang, "removed_shown", shown=shown, more=more)
 
 
-def _plural(n, one, many):
-    """Deutsche Anzeige-Zahl mit korrektem Numerus: '1 Ueberschrift' vs
-    '3 Ueberschriften'. one/many sind die kompletten Wortgruppen, damit auch
-    Faelle mit veraendertem Innenteil passen ('1 Zeilenumbruch zu einem
-    Absatz verbunden' vs 'K Zeilenumbrueche zu Absaetzen verbunden')."""
-    return f"{n} {one if n == 1 else many}"
-
-
-def _structure_note(n_headings, n_tables, n_joins):
+def _structure_note(n_headings, n_tables, n_joins, lang="de"):
     """Beziffert die geleistete Strukturarbeit fuer die Anzeige-Note (Block C).
     Nur Zaehler > 0 werden genannt, damit die Note bei einfachen PDFs nicht
-    unnoetig laenger wird (0/0/0 -> leerer String). Deutsch-only wie alle
-    Notes; die Note wird roh angezeigt (siehe offener Punkt in CLAUDE.md)."""
+    unnoetig laenger wird (0/0/0 -> leerer String)."""
     parts = []
     if n_headings > 0:
-        parts.append(_plural(n_headings, "Überschrift erkannt",
-                             "Überschriften erkannt"))
+        parts.append(_plural(n_headings, _nt(lang, "st_heading_one"),
+                             _nt(lang, "st_heading_many")))
     if n_tables > 0:
-        parts.append(_plural(n_tables, "Tabelle übernommen",
-                             "Tabellen übernommen"))
+        parts.append(_plural(n_tables, _nt(lang, "st_table_one"),
+                             _nt(lang, "st_table_many")))
     if n_joins > 0:
-        parts.append(_plural(n_joins, "Zeilenumbruch zu einem Absatz verbunden",
-                             "Zeilenumbrüche zu Absätzen verbunden"))
+        parts.append(_plural(n_joins, _nt(lang, "st_join_one"),
+                             _nt(lang, "st_join_many")))
     return ", ".join(parts) + "." if parts else ""
 
 
@@ -766,10 +930,11 @@ def _render_lines(pages_items, pages_tables=None):
     return out, {"joins": n_joins, "tables": n_tables}
 
 
-def _ocr_pages(path: str, page_numbers):
+def _ocr_pages(path: str, page_numbers, lang="de"):
     """
     Wandelt AUSGEWAEHLTE Seiten eines PDFs per OCR (Texterkennung) in Text um.
     page_numbers: Liste von 1-basierten Seitennummern.
+    lang: Sprache der Anleitung im Fehlerfall (die Meldung landet in der Note).
 
     Rueckgabe: (texte, fehler)
       - texte:  dict {seitennummer: erkannter_text} - kann bei einem Fehler
@@ -785,11 +950,7 @@ def _ocr_pages(path: str, page_numbers):
         from pdf2image import convert_from_path
         import pytesseract
     except ImportError:
-        return {}, (
-            "Fuer Bild-Seiten wird OCR benoetigt. Bitte installiere die Pakete:\n"
-            "  pip install pdf2image pytesseract\n"
-            "und das Programm Tesseract (siehe README, Abschnitt OCR)."
-        )
+        return {}, _nt(lang, "ocr_needed")
 
     # Falls wir Tesseract am Standardpfad gefunden haben, pytesseract dorthin zeigen.
     # (Damit ist kein PATH-Eintrag noetig.)
@@ -800,12 +961,7 @@ def _ocr_pages(path: str, page_numbers):
     try:
         pytesseract.get_tesseract_version()
     except Exception:
-        return {}, (
-            "Das Programm 'Tesseract' wurde nicht gefunden.\n"
-            "Windows: Installer von https://github.com/UB-Mannheim/tesseract/wiki\n"
-            "oder per winget: winget install -e --id UB-Mannheim.TesseractOCR\n"
-            "Nach der Installation Tool neu starten. Details im README."
-        )
+        return {}, _nt(lang, "tesseract_missing")
 
     # Nur die angefragten Seiten in Bilder wandeln und erkennen.
     # 150 dpi ist ein guter Kompromiss aus Genauigkeit und Tempo.
@@ -821,12 +977,7 @@ def _ocr_pages(path: str, page_numbers):
                                         **convert_kwargs)
         except Exception as e:
             # Meist fehlt 'poppler' (wird von pdf2image gebraucht)
-            return texts, (
-                f"PDF-Seite {n} konnte nicht in ein Bild gewandelt werden ({e}).\n"
-                "Windows braucht dafuer 'poppler'.\n"
-                "Per winget: winget install -e --id oschwartz10612.Poppler\n"
-                "Anleitung im README."
-            )
+            return texts, _nt(lang, "poppler_missing", n=n, e=e)
         if not images:
             texts[n] = ""
             continue
@@ -861,7 +1012,7 @@ _PAGE_TEXT_MIN = 15
 _IMG_TOKENS_PER_PAGE = 1500
 
 
-def extract_pdf(path: str) -> dict:
+def extract_pdf(path: str, lang: str = "de") -> dict:
     """PDF: Text -> Markdown. Wenn ueberwiegend Tabellen -> CSV.
     Seiten ohne Text (Scans/Bilder) werden EINZELN per OCR erkannt -
     auch in gemischten PDFs (z.B. Text-Deckblatt + gescannter Anhang)."""
@@ -942,12 +1093,11 @@ def extract_pdf(path: str) -> dict:
     # extrahierbar - aber wir sagen es, statt zu schweigen).
     image_note = ""
     if n_images > 0 and text_pages:
-        image_note = (f" Hinweis: {n_images} eingebettete(s) Bild(er)/Grafik(en) "
-                      f"wurden nicht übernommen (nur Text ist extrahierbar).")
+        image_note = _nt(lang, "image_note", n=n_images)
 
     # ---- Fall 1: reine Bild-PDF (alle Seiten ohne Text) -> komplette OCR ----
     if image_pages and not text_pages:
-        ocr_texts, ocr_error = _ocr_pages(path, image_pages)
+        ocr_texts, ocr_error = _ocr_pages(path, image_pages, lang=lang)
         if ocr_error and not any(t.strip() for t in ocr_texts.values()):
             if broken_pages and len(broken_pages) == n_pages:
                 # ALLE Seiten warfen Exceptions und OCR konnte nichts retten
@@ -959,11 +1109,10 @@ def extract_pdf(path: str) -> dict:
                     f"vermutlich beschädigt.",
                     detail=" | ".join(x for x in (first_error, ocr_error) if x))
             # OCR nicht moeglich -> ehrlich melden statt leeres Ergebnis
-            note = "BILD-PDF ERKANNT (kein Text enthalten). " + ocr_error
+            note = _nt(lang, "bildpdf_no_text", err=ocr_error)
             if broken_pages:
-                note = (f"ACHTUNG - UNVOLLSTÄNDIG: Seite(n) "
-                        f"{', '.join(map(str, broken_pages))} konnte(n) nicht "
-                        f"gelesen werden und wurde(n) übersprungen. " + note)
+                note = _nt(lang, "broken_skipped_prefix",
+                           pages=", ".join(map(str, broken_pages))) + note
             return {
                 "raw_text": "",
                 "converted": "",
@@ -976,21 +1125,17 @@ def extract_pdf(path: str) -> dict:
                           if ocr_texts.get(i, "").strip()]
         if broken_pages and len(broken_pages) == n_pages:
             # Keine echte Bild-PDF, sondern defekte Seiten - ehrlich benennen.
-            note = (f"PDF-Seiten ließen sich nicht direkt lesen und wurden "
-                    f"per Texterkennung (OCR) gerettet ({n_pages} Seiten).")
+            note = _nt(lang, "rescued_all_pages", n=n_pages)
         else:
-            note = (f"BILD-PDF per OCR erkannt ({n_pages} Seiten, Text war als Bild "
-                    f"eingebettet). Als Bild kostet so ein PDF ein Vielfaches an Tokens "
-                    f"- als Text ist es jetzt schlank lesbar.")
+            note = _nt(lang, "bildpdf_ocr", n=n_pages)
             if rescued_broken:
-                note += (f" Seite(n) {', '.join(map(str, rescued_broken))} "
-                         f"ließ(en) sich nicht direkt lesen und wurde(n) per "
-                         f"Texterkennung gerettet.")
+                note += _nt(lang, "rescued_pages",
+                            pages=", ".join(map(str, rescued_broken)))
         if ocr_error:
             missing = [i for i in image_pages if not ocr_texts.get(i, "").strip()]
-            note = (f"ACHTUNG - UNVOLLSTÄNDIG: OCR brach ab, Seite(n) "
-                    f"{', '.join(map(str, missing))} fehlen im Ergebnis. "
-                    + ocr_error + " | " + note)
+            note = _nt(lang, "ocr_aborted",
+                       pages=", ".join(map(str, missing)),
+                       err=ocr_error, note=note)
         return {
             "raw_text": ocr_text,
             "converted": md,
@@ -1004,7 +1149,7 @@ def extract_pdf(path: str) -> dict:
 
     # ---- Fall 2: GEMISCHTES PDF (Textseiten + Bildseiten) ----
     if image_pages and text_pages:
-        ocr_texts, ocr_error = _ocr_pages(path, image_pages)
+        ocr_texts, ocr_error = _ocr_pages(path, image_pages, lang=lang)
         # Seiten in ORIGINAL-Reihenfolge zusammensetzen:
         # Textseiten direkt (mit Zeilen-Records fuer die Strukturlogik),
         # Bildseiten aus der OCR (nur Text, keine Geometrie).
@@ -1039,7 +1184,8 @@ def extract_pdf(path: str) -> dict:
         n_headings = _mark_headings(cleaned_pages)
         lines, sstats = _render_lines(cleaned_pages, pages_tbl)
         md = _clean_text("\n".join(lines))
-        struct = _structure_note(n_headings, sstats["tables"], sstats["joins"])
+        struct = _structure_note(n_headings, sstats["tables"], sstats["joins"],
+                                 lang=lang)
 
         ocr_ok = [i for i in image_pages if ocr_texts.get(i, "").strip()]
         ocr_failed = [i for i in image_pages if i not in ocr_ok]
@@ -1052,30 +1198,26 @@ def extract_pdf(path: str) -> dict:
             failed_broken = [i for i in ocr_failed if i in broken_pages]
             parts = []
             if failed_image:
-                parts.append(f"Seite(n) {', '.join(map(str, failed_image))} "
-                             f"sind Bild-Seiten und konnten nicht per OCR "
-                             f"gelesen werden.")
+                parts.append(_nt(lang, "mixed_image_fail",
+                                 pages=", ".join(map(str, failed_image))))
             if failed_broken:
-                parts.append(f"Seite(n) {', '.join(map(str, failed_broken))} "
-                             f"konnte(n) nicht gelesen werden und wurde(n) "
-                             f"übersprungen.")
-            note = (f"ACHTUNG - UNVOLLSTÄNDIG: Gemischtes PDF, aber "
-                    + " ".join(parts) + f" {(ocr_error or '')} "
-                    f"Die {len(text_pages)} Textseite(n) sind enthalten.")
+                parts.append(_nt(lang, "mixed_broken_fail",
+                                 pages=", ".join(map(str, failed_broken))))
+            note = _nt(lang, "mixed_incomplete", parts=" ".join(parts),
+                       err=(ocr_error or ""), n=len(text_pages))
         else:
-            note = f"Gemischtes PDF: {len(text_pages)} Textseite(n) direkt extrahiert."
+            note = _nt(lang, "mixed_ok", n=len(text_pages))
             if image_ok:
-                note += (f" Seite(n) {', '.join(map(str, image_ok))} per OCR "
-                         f"erkannt (waren als Bild eingebettet).")
+                note += _nt(lang, "mixed_ocr_pages",
+                            pages=", ".join(map(str, image_ok)))
         if struct:
             note += " " + struct
         if rescued_broken:
-            note += (f" Seite(n) {', '.join(map(str, rescued_broken))} "
-                     f"ließ(en) sich nicht direkt lesen und wurde(n) per "
-                     f"Texterkennung gerettet.")
+            note += _nt(lang, "rescued_pages",
+                        pages=", ".join(map(str, rescued_broken)))
         if removed > 0:
-            note += (f" {removed} wiederkehrende Kopf-/Fusszeilen entfernt."
-                     + _removed_note(removed_patterns))
+            note += (_nt(lang, "headers_removed", n=removed)
+                     + _removed_note(removed_patterns, lang=lang))
 
         # Korrigierte Token-Rechnung: Textseiten zaehlen als Text,
         # Bildseiten als geschaetzte Bild-Kosten.
@@ -1114,15 +1256,14 @@ def extract_pdf(path: str) -> dict:
         # Alle Tabellen untereinander, durch Leerzeile getrennt
         csv_blocks = [_rows_to_csv(t) for t in all_tables]
         converted = "\n\n".join(csv_blocks)
-        note = ("PDF enthält überwiegend Tabellen -> als CSV konvertiert "
-                "(token-effizienteste Form für Daten).")
+        note = _nt(lang, "table_pdf")
         # DEFENSIV: Fliesstext ausserhalb der Tabellen darf nicht
         # stillschweigend verloren gehen - er kommt als Begleittext dazu.
         companion = _clean_text("\n".join(extra_texts))
         if companion:
             converted = (f"# Begleittext (ausserhalb der Tabellen):\n"
                          f"{companion}\n\n{converted}")
-            note += " Begleittext ausserhalb der Tabellen wurde mit übernommen."
+            note += _nt(lang, "companion_kept")
         return {
             "raw_text": raw_text,
             "converted": converted,
@@ -1137,16 +1278,17 @@ def extract_pdf(path: str) -> dict:
     n_headings = _mark_headings(cleaned_pages)
     lines, sstats = _render_lines(cleaned_pages, pages_tbl)
     md = _clean_text("\n".join(lines))
-    struct = _structure_note(n_headings, sstats["tables"], sstats["joins"])
+    struct = _structure_note(n_headings, sstats["tables"], sstats["joins"],
+                             lang=lang)
     if removed > 0 or struct:
-        note = "PDF-Fliesstext als Markdown bereinigt."
+        note = _nt(lang, "pdf_cleaned")
         if struct:
             note += " " + struct
         if removed > 0:
-            note += (f" {removed} wiederkehrende Kopf-/Fusszeilen entfernt."
-                     + _removed_note(removed_patterns))
+            note += (_nt(lang, "headers_removed", n=removed)
+                     + _removed_note(removed_patterns, lang=lang))
     else:
-        note = "PDF-Fliesstext extrahiert und als sauberes Markdown bereinigt."
+        note = _nt(lang, "pdf_plain")
     return {
         "raw_text": raw_text,
         "converted": md,
@@ -1155,7 +1297,7 @@ def extract_pdf(path: str) -> dict:
     }
 
 
-def extract_docx(path: str) -> dict:
+def extract_docx(path: str, lang: str = "de") -> dict:
     """Word: Ueberschriften -> Markdown-Headings, Tabellen -> Markdown-Tabellen.
     Wichtig: Absaetze und Tabellen bleiben in ORIGINAL-Reihenfolge
     (frueher landeten alle Tabellen gesammelt am Ende - Bezuege wie
@@ -1223,14 +1365,11 @@ def extract_docx(path: str) -> dict:
         "raw_text": raw_text,
         "converted": converted,
         "target_format": "markdown",
-        "note": ("Word-Struktur (Überschriften, Listen, Tabellen) in natives "
-                 "Markdown übersetzt - in Original-Reihenfolge. Hinweis: Fußnoten, "
-                 "Textboxen und Kopf-/Fußzeilen kann die Word-Bibliothek "
-                 "prinzipbedingt nicht extrahieren."),
+        "note": _nt(lang, "docx_note"),
     }
 
 
-def extract_xlsx(path: str) -> dict:
+def extract_xlsx(path: str, lang: str = "de") -> dict:
     """Excel: jedes Blatt -> CSV. Daten gehoeren in CSV (am wenigsten Tokens).
 
     Formel-Zellen: Wir lesen das Workbook DOPPELT - einmal mit data_only=True
@@ -1279,12 +1418,9 @@ def extract_xlsx(path: str) -> dict:
 
     converted = "\n\n".join(blocks).strip()
     raw_text = "\n\n".join(raw_parts)
-    note = ("Excel-Daten als CSV exportiert - das token-effizienteste Format "
-            "für Tabellen (bis zu 3x weniger als JSON/HTML).")
+    note = _nt(lang, "xlsx_note")
     if formula_fallbacks > 0:
-        note += (f" Hinweis: {formula_fallbacks} Formel-Zelle(n) ohne "
-                 f"gespeichertes Ergebnis - die Formel selbst wurde ausgegeben "
-                 f"(Datei einmal in Excel öffnen und speichern liefert die Werte).")
+        note += _nt(lang, "xlsx_formula", n=formula_fallbacks)
     return {
         "raw_text": raw_text,
         "converted": converted,
@@ -1293,7 +1429,7 @@ def extract_xlsx(path: str) -> dict:
     }
 
 
-def extract_csv(path: str) -> dict:
+def extract_csv(path: str, lang: str = "de") -> dict:
     """CSV ist schon optimal - nur einlesen und leicht saeubern."""
     with open(path, "r", encoding="utf-8", errors="replace") as f:
         content = f.read()
@@ -1302,11 +1438,11 @@ def extract_csv(path: str) -> dict:
         "raw_text": content,
         "converted": cleaned,
         "target_format": "csv",
-        "note": "CSV ist bereits das effizienteste Datenformat - nur Zeilenumbrueche vereinheitlicht.",
+        "note": _nt(lang, "csv_note"),
     }
 
 
-def extract_txt(path: str) -> dict:
+def extract_txt(path: str, lang: str = "de") -> dict:
     """Reiner Text -> als Markdown bereinigen."""
     with open(path, "r", encoding="utf-8", errors="replace") as f:
         content = f.read()
@@ -1315,11 +1451,11 @@ def extract_txt(path: str) -> dict:
         "raw_text": content,
         "converted": cleaned,
         "target_format": "markdown",
-        "note": "Textdatei bereinigt (ueberfluessige Leerzeilen und Whitespace entfernt).",
+        "note": _nt(lang, "txt_note"),
     }
 
 
-def extract_pptx(path: str) -> dict:
+def extract_pptx(path: str, lang: str = "de") -> dict:
     """PowerPoint via python-pptx -> strukturiertes Markdown.
 
     Pro Folie: Titel als Trenner "## Folie N: <Titel>", Body-Text als
@@ -1390,12 +1526,11 @@ def extract_pptx(path: str) -> dict:
     text = "\n\n".join(blocks)
     cleaned = _clean_text(text)
 
-    note = "PowerPoint-Folien in Markdown umgewandelt (Text pro Folie extrahiert)."
+    note = _nt(lang, "pptx_note")
     # Fairness-Hinweis: Sprechernotizen landen mit im Output - das ist je
     # nach Datei gewollt oder ueberraschend, deshalb sagen wir es dazu.
     if n_notes > 0:
-        note += (f" Hinweis: {n_notes} Folie(n) enthalten Sprechernotizen - "
-                 f"diese sind im Output mit enthalten.")
+        note += _nt(lang, "pptx_speaker", n=n_notes)
 
     return {
         "raw_text": text,
@@ -1462,7 +1597,7 @@ SUPPORTED_EXTENSIONS = sorted(_EXTRACTORS.keys())
 
 
 def convert_file(path: str, add_xml: bool = False, target_model: str = None,
-                 original_name: str = None) -> dict:
+                 original_name: str = None, lang: str = "de") -> dict:
     """
     Haupteinstieg. Nimmt einen Dateipfad, gibt ein Ergebnis-dict zurueck.
     target_model:  'claude' | 'gpt' | 'gemini' | 'none'
@@ -1471,10 +1606,12 @@ def convert_file(path: str, add_xml: bool = False, target_model: str = None,
                    True wirkt wie target_model='claude'.
     original_name: echter Dateiname fuers Wrapping (falls der Pfad nur ein
                    temporaerer Name ist, z.B. beim Server-Upload).
+    lang:          Sprache der Anzeige-Note ('de'/'en', sonst 'de').
       tokens_saved:  Differenz
       percent_saved: Ersparnis in Prozent
       token_method:  'tiktoken' oder 'estimate'
     """
+    lang = _norm_lang(lang)
     ext = os.path.splitext(path)[1].lower()
     extractor = _EXTRACTORS.get(ext)
     if extractor is None:
@@ -1485,7 +1622,7 @@ def convert_file(path: str, add_xml: bool = False, target_model: str = None,
         }
 
     try:
-        result = extractor(path)
+        result = extractor(path, lang=lang)
     except UnreadablePdfError as e:
         # Verstaendliche Hauptmeldung; der rohe technische Grund kommt
         # separat mit (fuers UI als ausklappbares Detail, nicht als
