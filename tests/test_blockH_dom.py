@@ -81,7 +81,9 @@ def _upload_with_error(page, payload):
     def handler(route):
         route.fulfill(status=400, content_type="application/json",
                       body=json.dumps(payload))
-    page.route("**/convert", handler)
+    # Seit Block I haengt der Client ?ui_lang= an die URL - der Mock muss
+    # den Query-String mitmatchen (Glob "**/convert" tut das nicht).
+    page.route(re.compile(r"/convert\?"), handler)
     path = os.path.join(FIXTURES, "blockh_dummy.txt")
     with open(path, "w", encoding="utf-8") as f:
         f.write("Inhalt egal - der Request wird abgefangen.")

@@ -26,7 +26,7 @@ import webbrowser
 
 from flask import Flask, request, jsonify, send_file, Response
 
-from converter import convert_file, SUPPORTED_EXTENSIONS
+from converter import convert_file, SUPPORTED_EXTENSIONS, _et, _norm_lang
 from prompt_trainer import analyze_prompt
 
 # ---------------------------------------------------------------------------
@@ -263,9 +263,39 @@ def _check_origin():
     """
     origin = request.headers.get("Origin")
     if origin and origin not in _ALLOWED_ORIGINS:
+        # Bewusst EIN statischer zweisprachiger Text (Block I): die 403 hat
+        # keine Kanal-Logik, sie trifft auch Requests ohne ui_lang.
         return jsonify({"ok": False,
-                        "error": "Anfrage von fremdem Origin abgelehnt."}), 403
+                        "error": ("Anfrage von fremdem Origin abgelehnt. / "
+                                  "Request from foreign origin rejected.")}), 403
     return None
+
+
+def _req_lang():
+    """
+    Ermittelt die UI-Sprache eines Requests in fester Reihenfolge:
+    Form-Feld ui_lang -> JSON-Body ui_lang -> Query-Parameter ui_lang ->
+    Default 'de'. Validierung macht _norm_lang (nur de/en).
+    Form- und Body-Zugriff sind abgesichert, weil sie bei einem Request
+    ueber dem Groessenlimit selbst RequestEntityTooLarge werfen - der
+    413-Handler braucht deshalb den Query-Parameter (der ohne Body-Parsing
+    lesbar bleibt).
+    """
+    lang = None
+    try:
+        lang = request.form.get("ui_lang")
+    except Exception:
+        pass
+    if not lang:
+        try:
+            body = request.get_json(silent=True)
+            if isinstance(body, dict):
+                lang = body.get("ui_lang")
+        except Exception:
+            pass
+    if not lang:
+        lang = request.args.get("ui_lang")
+    return _norm_lang(lang)
 
 
 @app.errorhandler(413)
@@ -276,9 +306,7 @@ def too_large(_e):
     """
     return jsonify({
         "ok": False,
-        "error": f"Datei bzw. Dateien zusammen zu gross "
-                 f"(Limit: {MAX_MB} MB pro Vorgang). "
-                 f"Erhoehe MAX_MB in app.py, falls du groessere Dateien brauchst.",
+        "error": _et(_req_lang(), "too_large", mb=MAX_MB),
     }), 413
 
 
@@ -306,14 +334,14 @@ def _process_upload(upload, target_model, ui_lang="de"):
     """
     filename = upload.filename or ""
     if not filename:
-        return {"ok": False, "error": "Dateiname fehlt."}
+        return {"ok": False, "error": _et(ui_lang, "filename_missing")}
 
     ext = os.path.splitext(filename)[1].lower()
     if ext not in SUPPORTED_EXTENSIONS:
         return {
             "ok": False,
-            "error": f"Dateityp '{ext}' nicht unterstuetzt. "
-                     f"Moeglich: {', '.join(SUPPORTED_EXTENSIONS)}",
+            "error": _et(ui_lang, "unsupported_type", ext=ext,
+                         exts=", ".join(SUPPORTED_EXTENSIONS)),
         }
 
     # Upload temporaer speichern (eindeutiger Name, um Kollisionen zu vermeiden)
@@ -354,17 +382,18 @@ def convert():
     konvertiert sie und gibt das Ergebnis als JSON zurueck.
     Die fertige Datei wird in OUTPUT_DIR abgelegt und ueber /download geholt.
     """
+    # UI-Sprache fuer Anzeige-Note UND Fehlertexte (Block I: Kanal-Helfer)
+    ui_lang = _req_lang()
     if "file" not in request.files:
-        return jsonify({"ok": False, "error": "Keine Datei empfangen."}), 400
+        return jsonify({"ok": False, "error": _et(ui_lang, "no_file")}), 400
 
     upload = request.files["file"]
     if not upload.filename:
-        return jsonify({"ok": False, "error": "Dateiname fehlt."}), 400
+        return jsonify({"ok": False,
+                        "error": _et(ui_lang, "filename_missing")}), 400
 
     # Ziel-Modell aus dem Formular lesen (claude/gpt/gemini/none)
     target_model = request.form.get("target_model", "none").lower()
-    # UI-Sprache fuer die Anzeige-Note; Validierung macht convert_file
-    ui_lang = request.form.get("ui_lang", "de")
 
     result = _process_upload(upload, target_model, ui_lang)
     if not result.get("ok"):
@@ -403,19 +432,19 @@ def convert_batch():
     if denied:
         return denied
 
+    ui_lang = _req_lang()
+
     # leere Eintraege (Feld ohne Dateiname) rauswerfen
     uploads = [u for u in request.files.getlist("files") if u and u.filename]
     if not uploads:
-        return jsonify({"ok": False, "error": "Keine Dateien empfangen."}), 400
+        return jsonify({"ok": False, "error": _et(ui_lang, "no_files")}), 400
     if len(uploads) > MAX_BATCH_FILES:
         return jsonify({
             "ok": False,
-            "error": f"Maximal {MAX_BATCH_FILES} Dateien gleichzeitig - "
-                     f"bitte in kleineren Gruppen konvertieren.",
+            "error": _et(ui_lang, "batch_too_many", n=MAX_BATCH_FILES),
         }), 400
 
     target_model = request.form.get("target_model", "none").lower()
-    ui_lang = request.form.get("ui_lang", "de")
 
     results = []
     for upload in uploads:
@@ -432,7 +461,7 @@ def convert_batch():
         except Exception as e:
             # Eine einzelne kaputte Datei darf den Batch NIE mitreissen.
             item["status"] = "error"
-            item["error"] = f"Fehler beim Verarbeiten der Datei: {e}"
+            item["error"] = _et(ui_lang, "batch_item_failed", e=e)
             results.append(item)
             continue
 
@@ -451,7 +480,7 @@ def convert_batch():
             item["note"] = res["note"]
         else:
             item["status"] = "error"
-            item["error"] = res.get("error", "Unbekannter Fehler.")
+            item["error"] = res.get("error") or _et(ui_lang, "unknown_error")
             if res.get("error_detail"):
                 item["error_detail"] = res["error_detail"]
         results.append(item)
@@ -498,12 +527,13 @@ def download_batch():
     if denied:
         return denied
 
+    ui_lang = _req_lang()
     data = request.get_json(silent=True) or {}
     entries = data.get("files")
     if not isinstance(entries, list) or not entries:
         return jsonify({
             "ok": False,
-            "error": "Keine Dateien zum Herunterladen angegeben.",
+            "error": _et(ui_lang, "zip_no_files"),
         }), 400
 
     buf = io.BytesIO()
@@ -533,8 +563,7 @@ def download_batch():
     if added == 0:
         return jsonify({
             "ok": False,
-            "error": "Keine gueltigen Dateien fuer den Download gefunden "
-                     "(evtl. Server neu gestartet).",
+            "error": _et(ui_lang, "zip_none_found"),
         }), 400
 
     buf.seek(0)
@@ -671,19 +700,20 @@ def outputs_open():
     denied = _check_origin()
     if denied:
         return denied
+    ui_lang = _req_lang()
     try:
         os.makedirs(OUTPUT_DIR, exist_ok=True)
         if not hasattr(os, "startfile"):
             return jsonify({
                 "ok": False,
-                "error": "Ordner-Oeffnen wird nur unter Windows unterstuetzt.",
+                "error": _et(ui_lang, "open_windows_only"),
             }), 501
         os.startfile(OUTPUT_DIR)
         return jsonify({"ok": True})
     except Exception as e:
         return jsonify({
             "ok": False,
-            "error": f"Ordner konnte nicht geoeffnet werden: {e}",
+            "error": _et(ui_lang, "open_failed", e=e),
         }), 500
 
 
@@ -694,7 +724,9 @@ def download(out_id):
     safe_id = os.path.basename(out_id)
     path = os.path.join(OUTPUT_DIR, safe_id)
     if not os.path.exists(path):
-        return "Datei nicht gefunden (evtl. Server neu gestartet).", 404
+        # Bleibt bewusst Plain-Text (kein JSON) - der Browser zeigt die
+        # Meldung direkt an; lokalisiert ueber den Query-Parameter.
+        return _et(_req_lang(), "download_not_found"), 404
 
     # gewuenschten Download-Namen aus Query holen
     download_name = request.args.get("name", safe_id)

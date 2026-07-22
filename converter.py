@@ -368,6 +368,72 @@ def _nt(lang, key, **kw):
     return _NOTES[_norm_lang(lang)][key].format(**kw)
 
 
+# Alle nutzerseitig sichtbaren FEHLERTEXTE (Block I) - gleiche Mechanik wie
+# _NOTES, aber eigener Katalog (Fehler != Notes; app.py nutzt ihn mit).
+# DE ist wortgleich zum frueheren Hardcode-Stand; beschlossene Ausnahmen:
+# 'unsupported_type' (auf die app.py-Fassung vereinheitlicht) und
+# 'batch_too_many' (an den Client-Wortlaut T().batchTooMany angeglichen).
+_ERRORS = {
+    "de": {
+        "unsupported_type": ("Dateityp '{ext}' nicht unterstuetzt. "
+                             "Moeglich: {exts}"),
+        "read_failed": "Fehler beim Lesen der Datei: {e}",
+        "pdf_unreadable": ("Keine der {n} Seite(n) dieser PDF konnte gelesen "
+                           "werden - auch nicht per Texterkennung. Die Datei "
+                           "ist vermutlich beschädigt."),
+        "filename_missing": "Dateiname fehlt.",
+        "no_file": "Keine Datei empfangen.",
+        "no_files": "Keine Dateien empfangen.",
+        "batch_too_many": ("Maximal {n} Dateien gleichzeitig — bitte in "
+                           "kleineren Gruppen konvertieren."),
+        "batch_item_failed": "Fehler beim Verarbeiten der Datei: {e}",
+        "unknown_error": "Unbekannter Fehler.",
+        "zip_no_files": "Keine Dateien zum Herunterladen angegeben.",
+        "zip_none_found": ("Keine gueltigen Dateien fuer den Download "
+                           "gefunden (evtl. Server neu gestartet)."),
+        "open_windows_only": ("Ordner-Oeffnen wird nur unter Windows "
+                              "unterstuetzt."),
+        "open_failed": "Ordner konnte nicht geoeffnet werden: {e}",
+        "download_not_found": ("Datei nicht gefunden "
+                               "(evtl. Server neu gestartet)."),
+        "too_large": ("Datei bzw. Dateien zusammen zu gross "
+                      "(Limit: {mb} MB pro Vorgang). Erhoehe MAX_MB in "
+                      "app.py, falls du groessere Dateien brauchst."),
+    },
+    "en": {
+        "unsupported_type": ("File type '{ext}' not supported. "
+                             "Possible: {exts}"),
+        "read_failed": "Error reading the file: {e}",
+        "pdf_unreadable": ("None of the {n} page(s) of this PDF could be "
+                           "read - not even via text recognition. The file "
+                           "is probably damaged."),
+        "filename_missing": "Filename missing.",
+        "no_file": "No file received.",
+        "no_files": "No files received.",
+        "batch_too_many": ("At most {n} files at once — please convert in "
+                           "smaller groups."),
+        "batch_item_failed": "Error processing the file: {e}",
+        "unknown_error": "Unknown error.",
+        "zip_no_files": "No files specified for download.",
+        "zip_none_found": ("No valid files found for download "
+                           "(the server may have been restarted)."),
+        "open_windows_only": ("Opening the folder is only supported "
+                              "on Windows."),
+        "open_failed": "The folder could not be opened: {e}",
+        "download_not_found": ("File not found "
+                               "(the server may have been restarted)."),
+        "too_large": ("File or files together too large "
+                      "(limit: {mb} MB per operation). Increase MAX_MB in "
+                      "app.py if you need larger files."),
+    },
+}
+
+
+def _et(lang, key, **kw):
+    """Fehlertext in der gewuenschten Sprache, formatiert."""
+    return _ERRORS[_norm_lang(lang)][key].format(**kw)
+
+
 def _removed_note(removed_lines, max_show=4, lang="de"):
     """Formatiert die entfernten Kopf-/Fusszeilen fuer den Hinweistext,
     damit der Nutzer Fehlgriffe sofort sehen kann (Transparenz)."""
@@ -1104,9 +1170,7 @@ def extract_pdf(path: str, lang: str = "de") -> dict:
                 # -> sauberer Fehler (HTTP 400) ueber den bestehenden Pfad,
                 # mit verstaendlicher Meldung statt roher pdfminer-Exception.
                 raise UnreadablePdfError(
-                    f"Keine der {n_pages} Seite(n) dieser PDF konnte gelesen "
-                    f"werden - auch nicht per Texterkennung. Die Datei ist "
-                    f"vermutlich beschädigt.",
+                    _et(lang, "pdf_unreadable", n=n_pages),
                     detail=" | ".join(x for x in (first_error, ocr_error) if x))
             # OCR nicht moeglich -> ehrlich melden statt leeres Ergebnis
             note = _nt(lang, "bildpdf_no_text", err=ocr_error)
@@ -1617,8 +1681,8 @@ def convert_file(path: str, add_xml: bool = False, target_model: str = None,
     if extractor is None:
         return {
             "ok": False,
-            "error": f"Dateityp '{ext}' wird nicht unterstuetzt. "
-                     f"Moeglich: {', '.join(SUPPORTED_EXTENSIONS)}",
+            "error": _et(lang, "unsupported_type", ext=ext,
+                         exts=", ".join(SUPPORTED_EXTENSIONS)),
         }
 
     try:
@@ -1629,7 +1693,7 @@ def convert_file(path: str, add_xml: bool = False, target_model: str = None,
         # Hauptfehler).
         return {"ok": False, "error": str(e), "error_detail": e.detail}
     except Exception as e:
-        return {"ok": False, "error": f"Fehler beim Lesen der Datei: {e}"}
+        return {"ok": False, "error": _et(lang, "read_failed", e=e)}
 
     source_name = os.path.basename(original_name) if original_name else os.path.basename(path)
     converted = result["converted"]

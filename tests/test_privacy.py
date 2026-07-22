@@ -66,7 +66,8 @@ def test_index_fetch_only_relative():
     hits = re.findall(r"""fetch\(\s*["'`]https?://[^"'`]+""", html)
     assert not hits, f"fetch() auf absolute URL: {hits}"
     # Positivprobe: die bekannten relativen fetch-Ziele existieren weiterhin
-    assert "fetch('/convert'" in html and "fetch('/stats')" in html, \
+    # (seit Block I traegt /convert den ui_lang-Query-Parameter)
+    assert "fetch(`/convert?ui_lang=" in html and "fetch('/stats')" in html, \
         "Erwartete relative fetch()-Aufrufe fehlen - Test prüft ins Leere"
 
 

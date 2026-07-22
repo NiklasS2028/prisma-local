@@ -1511,7 +1511,9 @@
     form.append('ui_lang', lang);  // Sprache der Anzeige-Note
 
     try {
-      const res = await fetch('/convert', { method: 'POST', body: form });
+      // ui_lang zusaetzlich als Query-Parameter: bei einer 413 (Datei zu
+      // gross) ist das Formular serverseitig nicht mehr lesbar, die Query schon.
+      const res = await fetch(`/convert?ui_lang=${lang}`, { method: 'POST', body: form });
       const data = await res.json();
       if (!data.ok) { showStatus(convStatus, 'error', '⚠ ' + (data.error || T().unknownError), data.error_detail); return; }
       renderConvResult(data);
@@ -1609,7 +1611,7 @@
   document.getElementById('downloadBtn').addEventListener('click', () => {
     if (!lastDownload) return;
     countFileOnce();
-    window.location.href = `/download/${lastDownload.id}?name=${encodeURIComponent(lastDownload.name)}`;
+    window.location.href = `/download/${lastDownload.id}?name=${encodeURIComponent(lastDownload.name)}&ui_lang=${lang}`;
   });
   document.getElementById('copyBtn').addEventListener('click', async () => {
     if (!lastFullText) return;
@@ -1670,7 +1672,8 @@
     form.append('ui_lang', lang);  // Sprache der Anzeige-Note
 
     try {
-      const res = await fetch('/convert-batch', { method: 'POST', body: form });
+      // Query-Parameter wie bei /convert: haelt die 413-Meldung lokalisiert.
+      const res = await fetch(`/convert-batch?ui_lang=${lang}`, { method: 'POST', body: form });
       const data = await res.json();
       if (!data.ok) {
         convBatch.classList.remove('show');
@@ -1780,7 +1783,7 @@
       // nackte Einzeldatei über den bestehenden, unveränderten Download
       const r = okRows[0];
       window.location.href =
-        `/download/${r.download_id}?name=${encodeURIComponent(r.download_name)}`;
+        `/download/${r.download_id}?name=${encodeURIComponent(r.download_name)}&ui_lang=${lang}`;
     } else {
       downloadZip(okRows);
     }
@@ -1792,7 +1795,7 @@
   async function downloadZip(okRows) {
     // ZIP zieht per download_id; die Namen sind nur Anzeige (Server
     // basename't sie und prüft die ID serverseitig auf Existenz).
-    const payload = { files: okRows.map(r => ({ id: r.download_id, name: r.download_name })) };
+    const payload = { files: okRows.map(r => ({ id: r.download_id, name: r.download_name })), ui_lang: lang };
     try {
       const res = await fetch('/download-batch', {
         method: 'POST',
@@ -2159,7 +2162,11 @@
   //     nutzen denselben Endpoint. Öffnet den outputs-Ordner im Explorer. ---
   document.querySelectorAll('.open-folder-btn').forEach(btn => {
     btn.addEventListener('click', () => {
-      fetch('/outputs/open', { method: 'POST' }).catch(() => {});
+      fetch('/outputs/open', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ui_lang: lang }),
+      }).catch(() => {});
     });
   });
 
