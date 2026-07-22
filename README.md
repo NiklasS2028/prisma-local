@@ -6,7 +6,7 @@ Local-first document converter with OCR, a rule-based prompt trainer, and usage 
 
 ![License: MIT](https://img.shields.io/badge/license-MIT-blue)
 ![Python 3.12](https://img.shields.io/badge/python-3.12-blue)
-![Tests: 138 passing](https://img.shields.io/badge/tests-138%20passing-brightgreen)
+![Tests: 211 passing](https://img.shields.io/badge/tests-211%20passing-brightgreen)
 ![100% local](https://img.shields.io/badge/privacy-100%25%20local-blueviolet)
 
 Built with: Python 3.12 · Flask · Tesseract OCR · pytest · Playwright
@@ -23,15 +23,15 @@ Prisma is a local browser UI with three tools for working with AI models: a **fi
 
 Why I built this
 
-Feeding documents into AI models usually means uploading them to someone else's cloud — a non-starter for internal, client or otherwise sensitive files. Prisma solves that by doing the whole conversion pipeline locally, with the "no data leaves the machine" promise enforced by an automated test rather than just claimed. The prompt trainer takes the same transparent-by-design stance: it uses explicit rules, not a black-box AI, so you can actually see why a prompt scores the way it does and learn from it.
+Feeding documents into AI models usually means uploading them to someone else's cloud — a non-starter for internal, client or otherwise sensitive files. Prisma solves that by doing the whole conversion pipeline locally, with the "no data leaves the machine" promise enforced by an automated test rather than just claimed. The prompt trainer takes the same transparent-by-design stance: it uses explicit rules, not a black-box AI, so you can actually see why a prompt is rated the way it is and learn from it.
 
 ## What the tools do
 
 1. **File Converter**: documents become structured Markdown (headings and tables included), pure data tables become CSV — wrapped to fit your AI model (Claude → XML tags, GPT → Markdown sections, Gemini → clear structure). Image PDFs and mixed PDFs (text + scans) are detected automatically and processed with **OCR**, page by page, so nothing gets lost. Drop in **multiple files at once** (up to 20): they are converted one after another into a list view with a per-file status, and the successful ones download as a **single ZIP** (each file keeps its own ID through the whole chain, so results can never be mixed up); failed files stay clearly marked and never enter the download. A single file still shows the familiar result bar with download, **"Open folder"**, copy and "New file", which stays visible while scrolling.
-2. **Prompt Trainer**: rates the **structure** of a prompt with transparent rules (deliberately **no AI**), shows a score (0–100) with a traffic light, explains every check with ✗/✓ examples and builds a model-specific template with [placeholder questions] you fill in yourself — that's exactly how you learn. With demo buttons and a learning loop.
-3. **Statistics**: files processed, prompts analyzed, tokens saved (with page and cost estimates, clearly labelled as estimates), score distribution, milestones, format usage — plus a "Manage outputs" section for cleaning up.
+2. **Prompt Trainer**: rates the **structure** of a prompt with transparent rules (deliberately **no AI**), shows how many of the checked criteria your prompt meets ("X of 7 criteria met"; only criteria that apply to your prompt are counted) with a traffic light, explains every check with ✗/✓ examples and builds a model-specific template with [placeholder questions] you fill in yourself — that's exactly how you learn. With demo buttons, live analysis while you type and a learning loop.
+3. **Statistics**: files processed, prompts analyzed, tokens saved (with page and cost estimates, clearly labelled as estimates), your most common weak spots (how often each criterion was missed), milestones, format usage — plus a "Manage outputs" section for cleaning up.
 
-**Languages:** German and English UI (toggle in the top right, the choice is remembered). The Prompt Trainer additionally detects your prompt's language and builds the template in that language.
+**Languages:** German and English UI (toggle in the top right, the choice is remembered); the converter's result notes and all user-facing error messages follow the UI language as well. The Prompt Trainer additionally detects your prompt's language and builds the template in that language.
 
 **Design:** two themes, toggled in the top right (☀/☾): light (editorial style, default) and dark ("neon workshop"). Your choice is remembered.
 
@@ -81,11 +81,11 @@ The browser download ("Download file") is an **additional copy**; where it is sa
 
 ## Honesty & known limitations
 
-The promise is not "nothing is ever lost" but: **nothing is lost silently.** Whatever cannot be extracted is named in the result note. Inherent limits: Word footnotes/text boxes and embedded PDF images are not carried over (the app tells you), Excel formulas without a cached result appear as the formula string, the converter's result notes are deliberately still German-only, and token counting without `tiktoken` is a declared estimate.
+The promise is not "nothing is ever lost" but: **nothing is lost silently.** Whatever cannot be extracted is named in the result note. Inherent limits: Word footnotes/text boxes and embedded PDF images are not carried over (the app tells you), Excel formulas without a cached result appear as the formula string, and token counting without `tiktoken` is a declared estimate.
 
 ## Tests
 
-138 tests in 13 suites that construct their own test files (additionally required: `reportlab`, `playwright`). `test_block1`, `test_block2` and `test_blockI_batch` use the code directly / the Flask test client; all others need the server running (`python app.py`):
+211 tests in 16 suites that construct their own test files (additionally required: `reportlab`, `playwright`). `test_block1`, `test_block2` and `test_blockI_batch` use the code directly / the Flask test client; all others need the server running (`python app.py`):
 
 ```powershell
 python tests/test_block1.py        # Converter core (PDF/DOCX/XLSX/PPTX)
@@ -100,7 +100,10 @@ python tests/test_privacy.py       # Zero external connections (proof)
 python tests/test_blockG_dom.py    # Result bar + open-folder button
 python tests/test_blockH_dom.py    # Error display (clear message + collapsible detail)
 python tests/test_pdf_robust.py    # PDF robustness (bounding-box artifacts, page-wise OCR)
+python tests/test_pdf_struct.py    # PDF structure (headings/tables carried into Markdown)
 python tests/test_blockI_batch.py  # Batch conversion (unique IDs, no swap, ZIP, limit)
+python tests/test_notes_lang.py    # Localized converter notes (de/en, ui_lang chain)
+python tests/test_errors_lang.py   # Localized error messages (de/en, language channels)
 ```
 
 ## License
