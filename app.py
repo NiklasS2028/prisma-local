@@ -179,7 +179,11 @@ def _load_stats():
     _dbg("_load_stats <- {} | path={} exists={} size={}".format(
         caller, STATS_PATH, _exists, _size))
     try:
-        with open(STATS_PATH, "r", encoding="utf-8") as f:
+        # utf-8-sig: verarbeitet Dateien mit UND ohne BOM. Ein Endnutzer, der
+        # stats.json in Notepad oeffnet und speichert, schreibt eine UTF-8-BOM
+        # (EF BB BF); mit reinem "utf-8" wuerde json.load daran scheitern und
+        # still auf Nullen zurueckfallen. Schreiben bleibt utf-8 ohne BOM.
+        with open(STATS_PATH, "r", encoding="utf-8-sig") as f:
             raw = json.load(f)
         if not isinstance(raw, dict):
             raise ValueError("stats.json ist kein Objekt")
@@ -758,7 +762,10 @@ if __name__ == "__main__":
         _st_exists = os.path.exists(STATS_PATH)
         _st_head = ""
         if _st_exists:
-            with open(STATS_PATH, "r", encoding="utf-8") as _f:
+            # utf-8-sig hier nur fuer Konsistenz mit _load_stats: wird eine
+            # BOM-Datei untersucht, bleibt der Log-Kopf lesbar und beginnt
+            # nicht mit ﻿. Reines Debug, kein Verhaltenswechsel.
+            with open(STATS_PATH, "r", encoding="utf-8-sig") as _f:
                 _st_head = _f.read(300)
         _dbg("START stats.json exists={} head={!r}".format(_st_exists, _st_head))
     except Exception as _e:

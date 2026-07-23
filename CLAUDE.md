@@ -12,7 +12,7 @@ Der Quellcode ist auf GitHub (NiklasS2028/prisma-local) veroeffentlicht.
 - Packaging: PyInstaller (onedir)
 
 ## Teststand
-Aktuell: 211 Tests / 16 Suiten. Diese Zeile bei jeder Aenderung am Testumfang
+Aktuell: 212 Tests / 16 Suiten. Diese Zeile bei jeder Aenderung am Testumfang
 mitfuehren.
 
 ## Pre-Push-Checkliste

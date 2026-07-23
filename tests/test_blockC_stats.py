@@ -217,6 +217,38 @@ def test_corrupt_stats_file_survives():
     assert s["files_converted"] == 1 and s["tokens_saved_total"] == 50
 
 
+def test_bom_stats_file_loads():
+    """Block J: stats.json mit UTF-8-BOM (EF BB BF) muss beim Lesen korrekt
+    geladen werden - nicht still auf Nullen zurueckfallen. Realer Ausloeser:
+    Endnutzer oeffnet und speichert die Datei in Notepad, das schreibt die BOM.
+    Rot-vor-Fix: mit encoding="utf-8" scheitert json.load an der BOM und die
+    Werte gehen verloren; mit "utf-8-sig" bleiben sie erhalten."""
+    reset()
+    payload = {"files_converted": 42, "prompts_analyzed": 7,
+               "tokens_saved_total": 1234,
+               "criteria_missed": {"task": 3},
+               "format_counts": {"pdf": 5}}
+    json_bytes = json.dumps(payload).encode("utf-8")
+    # BOM-Bytes explizit voranstellen (kein encoding-Automatismus)
+    with open(STATS_PATH, "wb") as f:
+        f.write(b"\xef\xbb\xbf" + json_bytes)
+
+    s = get_stats()
+    assert s["files_converted"] == 42, \
+        "BOM-Datei: files_converted verloren (Fallback auf Null?)"
+    assert s["prompts_analyzed"] == 7, "BOM-Datei: prompts_analyzed verloren"
+    assert s["tokens_saved_total"] == 1234, "BOM-Datei: tokens_saved_total verloren"
+    assert s["criteria_missed"]["task"] == 3, "BOM-Datei: criteria_missed verloren"
+    assert s["format_counts"]["pdf"] == 5, "BOM-Datei: format_counts verloren"
+
+    # Gegenprobe: dieselbe Datei OHNE BOM laedt weiterhin korrekt (unveraendert).
+    with open(STATS_PATH, "wb") as f:
+        f.write(json_bytes)
+    s = get_stats()
+    assert s["files_converted"] == 42 and s["tokens_saved_total"] == 1234, \
+        "Datei ohne BOM darf sich nicht anders verhalten"
+
+
 def test_foreign_keys_are_dropped():
     """Fremde/injizierte Schlüssel in stats.json werden beim Laden verworfen."""
     reset()
@@ -430,6 +462,7 @@ ALL_TESTS = [
     test_old_schema_file_normalizes,
     test_stats_file_numbers_only,
     test_corrupt_stats_file_survives,
+    test_bom_stats_file_loads,
     test_foreign_keys_are_dropped,
     test_origin_check_reset,
     test_origin_check_count_endpoints,
