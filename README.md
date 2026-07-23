@@ -7,6 +7,7 @@ Local-first document converter with OCR, a rule-based prompt trainer, and usage 
 ![License: MIT](https://img.shields.io/badge/license-MIT-blue)
 ![Python 3.12](https://img.shields.io/badge/python-3.12-blue)
 ![Tests: 212 passing](https://img.shields.io/badge/tests-212%20passing-brightgreen)
+[![CI](https://github.com/NiklasS2028/prisma-local/actions/workflows/tests.yml/badge.svg)](https://github.com/NiklasS2028/prisma-local/actions/workflows/tests.yml)
 ![100% local](https://img.shields.io/badge/privacy-100%25%20local-blueviolet)
 
 Built with: Python 3.12 · Flask · Tesseract OCR · pytest · Playwright
@@ -85,7 +86,9 @@ The promise is not "nothing is ever lost" but: **nothing is lost silently.** Wha
 
 ## Tests
 
-212 tests in 16 suites that construct their own test files (additionally required: `reportlab`, `playwright`). `test_block1`, `test_block2` and `test_blockI_batch` use the code directly / the Flask test client; all others need the server running (`python app.py`):
+212 tests in 16 suites that construct their own test files (additionally required: `reportlab`, `playwright`). Five suites run in-process without a server — `test_block1`, `test_block2`, `test_blockI_batch`, `test_pdf_struct` and `test_pdf_robust` (via the code directly / the Flask test client); the other eleven need the server running (`python app.py`):
+
+**Continuous integration:** GitHub Actions runs the five serverless suites (78 tests) on every push and pull request to `main`, on `ubuntu-latest` with Tesseract and poppler installed — that is what the CI badge reflects. The other eleven suites (two HTTP smoke/stats suites and nine Playwright browser suites) run locally only; keeping them out of CI avoids red builds caused by browser installation or server timing rather than real defects. The 212 tests / 16 suites total above is the full local suite.
 
 ```powershell
 python tests/test_block1.py        # Converter core (PDF/DOCX/XLSX/PPTX)

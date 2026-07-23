@@ -1,0 +1,54 @@
+name: tests
+
+# Runs the serverless test suites on every push and pull request to main.
+# Scope is deliberate: the five in-process suites (no running server, no
+# browser) give a stable, honest signal. The nine Playwright/browser suites
+# stay local — a red badge from CI infrastructure flakiness would be worse
+# than a slightly smaller covered set. See the READMEs for the split.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  serverless-suites:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # Tesseract (deu+eng to match the app's real OCR path) and poppler for
+      # the OCR-dependent suites test_block1 and test_pdf_robust.
+      - name: Install OCR system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y tesseract-ocr tesseract-ocr-deu poppler-utils
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install reportlab Pillow
+
+      # Each suite is its own step. The suites are script runners that call
+      # sys.exit(1) on any failing test, so a red test propagates a non-zero
+      # exit and fails the step — and with it the job.
+      - name: test_block1 (converter core, incl. OCR)
+        run: python tests/test_block1.py
+
+      - name: test_block2 (prompt trainer)
+        run: python tests/test_block2.py
+
+      - name: test_blockI_batch (batch conversion)
+        run: python tests/test_blockI_batch.py
+
+      - name: test_pdf_struct (PDF structure)
+        run: python tests/test_pdf_struct.py
+
+      - name: test_pdf_robust (PDF robustness, incl. OCR)
+        run: python tests/test_pdf_robust.py
