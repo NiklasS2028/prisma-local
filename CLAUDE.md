@@ -15,6 +15,14 @@ Der Quellcode ist auf GitHub (NiklasS2028/prisma-local) veroeffentlicht.
 Aktuell: 212 Tests / 16 Suiten. Diese Zeile bei jeder Aenderung am Testumfang
 mitfuehren.
 
+## CI
+GitHub Actions (`.github/workflows/tests.yml`) laeuft bei jedem Push und Pull
+Request auf `main`. Umfang bewusst begrenzt: die 5 serverlosen Suiten
+(test_block1, test_block2, test_blockI_batch, test_pdf_struct, test_pdf_robust,
+zusammen 78 Tests) auf ubuntu-latest mit Tesseract und poppler. Die 2 HTTP- und
+9 Playwright-Suiten laufen nur lokal, damit kein rotes Badge aus Infrastruktur
+statt echten Fehlern entsteht. Die Gesamtzahl 212/16 ist der volle lokale Stand.
+
 ## Pre-Push-Checkliste
 Vor jedem Push pruefen. Die Punkte sind Pflicht, nicht optional.
 
