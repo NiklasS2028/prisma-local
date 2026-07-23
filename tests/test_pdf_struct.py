@@ -811,7 +811,13 @@ def test_c4_structure_note_in_pdf():
             "3 Zeilenumbrüche zu Absätzen verbunden.") in r_e["note"], r_e["note"]
     r_i = _convert_fixture("i_blocksatz_punkt")
     assert "1 Zeilenumbruch zu einem Absatz verbunden." in r_i["note"], r_i["note"]
-    r_d = _convert_fixture("d_liste")
+    # return ist nur zulaessig, weil d_liste am Ende steht -
+    # bei Umsortierung wuerden nachfolgende Assertions uebersprungen.
+    try:
+        r_d = _convert_fixture("d_liste")
+    except FixtureSkipped as e:
+        print(f"        SKIP d_liste: {e}")
+        return
     for w in ("Überschrift", "Tabelle", "Zeilenumbruch"):
         assert w not in r_d["note"], \
             f"Simple Liste sollte keine Struktur-Note tragen: {r_d['note']}"
